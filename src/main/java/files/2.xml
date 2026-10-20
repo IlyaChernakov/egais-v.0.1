@@ -1,0 +1,41 @@
+<ns:Documents Version="1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns="http://fsrar.ru/WEGAIS/WB_DOC_SINGLE_01" xmlns:pref="http://fsrar.ru/WEGAIS/ProductRef_v2" xmlns:awr="http://fsrar.ru/WEGAIS/ActWriteOff_v3" xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">
+  <ns:Owner>
+    <ns:FSRAR_ID>020000046855</ns:FSRAR_ID>
+  </ns:Owner>
+  <ns:Document>
+    <ns:ActWriteOff_v3>
+      <awr:Identity>18</awr:Identity>
+      <awr:Header>
+        <awr:ActNumber>18</awr:ActNumber>
+        <awr:ActDate>2024-08-15</awr:ActDate>
+        <awr:TypeWriteOff>Порча</awr:TypeWriteOff>
+        <awr:Note>Списание по инвентаризации 1 от 15-08-2024</awr:Note>
+      </awr:Header>
+	  <awr:Content>
+        <awr:Position>
+        <awr:Identity>2604</awr:Identity>
+        <awr:Quantity>12.0000</awr:Quantity>
+        <awr:InformF1F2>
+            <awr:InformF2>
+                <pref:F2RegId>FB-000006263585298</pref:F2RegId>
+            </awr:InformF2>
+        </awr:InformF1F2>
+        <awr:MarkCodeInfo>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604001</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604002</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604003</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604004</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604005</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604006</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604007</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604008</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604009</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604010</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604011</ce:amc>
+            <ce:amc xmlns:ce="http://fsrar.ru/WEGAIS/CommonV3">20N00000RGCLA3LGMLM1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD82604012</ce:amc>
+        </awr:MarkCodeInfo>
+    </awr:Position>
+</awr:Content>
+    </ns:ActWriteOff_v3>
+  </ns:Document>
+</ns:Documents>

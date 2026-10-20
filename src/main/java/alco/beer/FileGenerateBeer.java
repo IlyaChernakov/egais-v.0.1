@@ -1,22 +1,38 @@
 package alco.beer;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
 import java.io.File;
 import java.util.List;
 
-import static helpers.Constants.*;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import core.GenerationException;
+import helpers.XmlSupport;
+
+import static helpers.Constants.TAG_CONTENT;
+import static helpers.Constants.TAG_F2_REG_ID;
+import static helpers.Constants.TAG_IDENTITY;
+import static helpers.Constants.TAG_INFORM_F1F2;
+import static helpers.Constants.TAG_INFORM_F2;
+import static helpers.Constants.TAG_POSITION;
+import static helpers.Constants.TAG_QUANTITY;
+
+/**
+ * Формирование XML акта списания по пиву и пивным напиткам.
+ */
 public class FileGenerateBeer {
 
-    public void generateXmlFileBeer(List<ActPositionBeer> actPositionBeer) {
+    /**
+     * Записывает акт списания в указанный файл.
+     *
+     * @param actPositionBeer позиции акта
+     * @param outputFile      файл результата (родительские каталоги создаются автоматически)
+     * @throws GenerationException если файл не удалось записать
+     */
+    public void generateXmlFileBeer(List<ActPositionBeer> actPositionBeer, File outputFile) throws GenerationException {
         try {
             DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
             DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
@@ -47,15 +63,12 @@ public class FileGenerateBeer {
                 f2RegId.appendChild(doc.createTextNode(actPositionsBeer.getFb()));
                 informF2.appendChild(f2RegId);
             }
-            TransformerFactory transformerFactory = TransformerFactory.newInstance();
-            Transformer transformer = transformerFactory.newTransformer();
-            DOMSource source = new DOMSource(doc);
 
-            StreamResult result = new StreamResult(new File(FILE_PATH_OUT_BEER));
-            transformer.transform(source, result);
-
+            XmlSupport.write(doc, outputFile);
+        } catch (GenerationException e) {
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new GenerationException("Не удалось сформировать акт по пиву: " + e.getMessage(), e);
         }
     }
 }

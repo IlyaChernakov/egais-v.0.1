@@ -1,24 +1,46 @@
 package alco.strong;
-import javax.xml.parsers.DocumentBuilderFactory;
+
+import java.io.File;
+import java.util.List;
+
 import javax.xml.parsers.DocumentBuilder;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import java.io.File;
-import java.util.List;
 
-import static helpers.Constants.*;
+import core.GenerationException;
+import helpers.XmlSupport;
 
+import static helpers.Constants.NAMESPACE_CE;
+import static helpers.Constants.TAG_AMC;
+import static helpers.Constants.TAG_CONTENT;
+import static helpers.Constants.TAG_F2_REG_ID;
+import static helpers.Constants.TAG_IDENTITY;
+import static helpers.Constants.TAG_INFORM_F1F2;
+import static helpers.Constants.TAG_INFORM_F2;
+import static helpers.Constants.TAG_MARK_CODE_INFO;
+import static helpers.Constants.TAG_POSITION;
+import static helpers.Constants.TAG_QUANTITY;
+
+/**
+ * Формирование XML акта списания по крепкому алкоголю.
+ */
 public class FileGenerateStrong {
 
-    public void generateXmlFile(List<ActPositionStrong> actPositionStrong) {
+    private final MarkGenerate markGenerate = new MarkGenerate();
 
+    /**
+     * Записывает акт списания в указанный файл.
+     *
+     * @param actPositionStrong позиции акта
+     * @param outputFile        файл результата (родительские каталоги создаются автоматически)
+     * @return количество сформированных марок
+     * @throws GenerationException если файл не удалось записать или количество некорректно
+     */
+    public int generateXmlFile(List<ActPositionStrong> actPositionStrong, File outputFile) throws GenerationException {
+        int totalMarks = 0;
         try {
             DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
             DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
@@ -52,29 +74,33 @@ public class FileGenerateStrong {
                 f2RegId.appendChild(doc.createTextNode(actPositionsStrong.getFb()));
                 informF2.appendChild(f2RegId);
 
-                for (int i = 0; i < Double.parseDouble(actPositionsStrong.getQuantity()); i++) {
-                    Element amc = doc.createElement(TAG_AMC);
-                    int number = i + 1;
-                    String markPos = new MarkGenerate().numberingMark(actPositionsStrong, number);
+                int marks;
+                try {
+                    marks = (int) Double.parseDouble(actPositionsStrong.getQuantity().trim());
+                } catch (NumberFormatException e) {
+                    throw new GenerationException("Позиция №" + actPositionsStrong.getNumber()
+                            + ": количество «" + actPositionsStrong.getQuantity() + "» не является числом.", e);
+                }
 
+                for (int i = 0; i < marks; i++) {
+                    Element amc = doc.createElement(TAG_AMC);
+                    String markPos = markGenerate.numberingMark(actPositionsStrong, i + 1);
                     amc.appendChild(doc.createTextNode(markPos));
                     markCodeInfo.appendChild(amc);
 
                     Attr attr = doc.createAttribute("xmlns:ce");
-                    attr.setValue("http://fsrar.ru/WEGAIS/CommonV3");
+                    attr.setValue(NAMESPACE_CE);
                     amc.setAttributeNode(attr);
                 }
+                totalMarks += marks;
             }
-            TransformerFactory transformerFactory = TransformerFactory.newInstance();
-            Transformer transformer = transformerFactory.newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
 
-            StreamResult result = new StreamResult(new File(FILE_PATH_OUT_STRONG));
-            transformer.transform(source, result);
-
+            XmlSupport.write(doc, outputFile);
+            return totalMarks;
+        } catch (GenerationException e) {
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new GenerationException("Не удалось сформировать акт по крепкому алкоголю: " + e.getMessage(), e);
         }
     }
 }
