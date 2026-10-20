@@ -59,9 +59,6 @@ public final class Constants {
     /** Атрибут версии формата у корневого элемента. */
     public static final String ATTR_VERSION = "Version";
 
-    /** Объявление пространства имён марок у элементов {@code ce:amc}. */
-    public static final String ATTR_XMLNS_CE = "xmlns:ce";
-
     /** Значение версии формата у корневого элемента. */
     public static final String DOCUMENTS_VERSION = "1.0";
 

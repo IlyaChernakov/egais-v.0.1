@@ -4,11 +4,6 @@ import java.io.File;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -83,35 +78,5 @@ public final class XmlSupport {
             return "";
         }
         return nodes.item(0).getTextContent().trim();
-    }
-
-    /**
-     * Записывает документ в файл в кодировке UTF-8 с отступами.
-     * Родительские каталоги создаются автоматически.
-     *
-     * @param document   документ для записи
-     * @param outputFile файл результата
-     * @throws GenerationException если каталог или файл не удалось создать
-     */
-    public static void write(Document document, File outputFile) throws GenerationException {
-        if (outputFile == null) {
-            throw new GenerationException("Не задан файл для сохранения результата.");
-        }
-        try {
-            File parent = outputFile.getParentFile();
-            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-                throw new GenerationException("Не удалось создать папку: " + parent.getAbsolutePath());
-            }
-            TransformerFactory transformerFactory = TransformerFactory.newInstance();
-            Transformer transformer = transformerFactory.newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
-            transformer.transform(new DOMSource(document), new StreamResult(outputFile));
-        } catch (GenerationException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new GenerationException("Не удалось записать файл " + outputFile.getAbsolutePath()
-                    + ": " + e.getMessage(), e);
-        }
     }
 }
