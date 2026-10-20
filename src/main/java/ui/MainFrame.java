@@ -10,6 +10,8 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.event.ActionEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.time.LocalDate;
@@ -60,7 +62,6 @@ public class MainFrame extends JFrame {
     private static final String PREF_LAST_INPUT_FILE = "lastInputFile";
     private static final String PREF_LAST_INPUT_DIR = "lastInputDir";
     private static final String PREF_LAST_OUTPUT_DIR = "lastOutputDir";
-    private static final String PREF_FSRAR_ID = "fsrarId";
     private static final String PREF_ACT_NUMBER = "actNumber";
     private static final String PREF_TYPE_WRITE_OFF = "typeWriteOff";
 
@@ -236,8 +237,10 @@ public class MainFrame extends JFrame {
         fieldConstraints.insets = new Insets(3, 0, 3, 0);
 
         addHeaderRow(panel, "FSRAR_ID организации:", fsrarIdField, 0, labelConstraints, fieldConstraints);
-        fsrarIdField.setToolTipText("Код организации в ЕГАИС, только цифры. "
-                + "Если файл остатков уже выбран, подставляется из него автоматически.");
+        // Код всегда берётся из выбранного файла остатков, поэтому поле только для чтения:
+        // так в акт не попадёт код, не совпадающий с самой выгрузкой.
+        fsrarIdField.setEditable(false);
+        fsrarIdField.setToolTipText("Заполняется автоматически из файла остатков ЕГАИС и не редактируется.");
 
         addHeaderRow(panel, "Номер акта:", actNumberField, 1, labelConstraints, fieldConstraints);
         actNumberField.setToolTipText("Номер акта; он же записывается в awr:Identity документа");
@@ -317,6 +320,14 @@ public class MainFrame extends JFrame {
         openFolderButton.addActionListener(e -> openOutputFolder());
         strongCheckBox.addActionListener(e -> updateButtons());
         beerCheckBox.addActionListener(e -> updateButtons());
+        // Путь можно не только выбрать в диалоге, но и вписать руками,
+        // поэтому FSRAR_ID обновляем ещё и при уходе фокуса с поля файла.
+        inputField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) {
+                updateFsrarIdFromInput(currentInputFile());
+            }
+        });
         updateButtons();
     }
 
@@ -339,7 +350,7 @@ public class MainFrame extends JFrame {
             outputField.setText(selected.getParentFile().getAbsolutePath());
         }
         log("Выбран файл остатков: " + selected.getAbsolutePath());
-        fillFsrarIdFromInput(selected);
+        updateFsrarIdFromInput(selected);
         updateButtons();
     }
 
@@ -383,6 +394,13 @@ public class MainFrame extends JFrame {
             return;
         }
 
+        // Поле FSRAR_ID недоступно для правки, поэтому объясняем, что именно не так с файлом.
+        if (fsrarIdField.getText().trim().isEmpty()) {
+            showWarning("В файле остатков не найден FSRAR_ID организации,"
+                    + " поэтому акт сформировать нельзя.\n\nФайл: " + inputFile.getAbsolutePath());
+            return;
+        }
+
         ActHeader header;
         try {
             header = ActHeader.of(fsrarIdField.getText(), actNumberField.getText(),
@@ -396,7 +414,6 @@ public class MainFrame extends JFrame {
         writePreference(PREF_LAST_INPUT_FILE, inputFile);
         writePreference(PREF_LAST_INPUT_DIR, inputFile.getParentFile());
         writePreference(PREF_LAST_OUTPUT_DIR, outputDirectory);
-        writePreference(PREF_FSRAR_ID, header.getFsrarId());
         writePreference(PREF_ACT_NUMBER, header.getActNumber());
         writePreference(PREF_TYPE_WRITE_OFF, header.getTypeWriteOff());
 
@@ -526,7 +543,7 @@ public class MainFrame extends JFrame {
                             outputField.setText(file.getParentFile().getAbsolutePath());
                         }
                         log("Выбран файл остатков: " + file.getAbsolutePath());
-                        fillFsrarIdFromInput(file);
+                        updateFsrarIdFromInput(file);
                     }
                     updateButtons();
                     return true;
@@ -645,30 +662,44 @@ public class MainFrame extends JFrame {
     }
 
     /**
-     * Подставляет FSRAR_ID организации из выбранного файла остатков, если поле ещё пустое.
-     * Код есть в самой выгрузке, поэтому искать его отдельно не нужно.
+     * Обновляет FSRAR_ID организации по выбранному файлу остатков.
+     * <p>
+     * Поле только для чтения: значение всегда берётся из файла, поэтому при выборе
+     * другого файла оно заменяется, а если кода в файле нет — очищается.
      *
      * @param inputFile выбранный файл остатков
      */
-    private void fillFsrarIdFromInput(File inputFile) {
-        if (inputFile == null || !inputFile.isFile() || !fsrarIdField.getText().trim().isEmpty()) {
+    private void updateFsrarIdFromInput(File inputFile) {
+        if (inputFile == null || !inputFile.isFile()) {
             return;
         }
+        String owner;
         try {
-            String owner = XmlSupport.ownerFsrarId(inputFile);
-            if (!owner.isEmpty()) {
-                fsrarIdField.setText(owner);
-                log("FSRAR_ID организации взят из файла остатков: " + owner);
-            }
+            owner = XmlSupport.ownerFsrarId(inputFile);
         } catch (GenerationException e) {
-            // Файл может быть выбран до того, как он станет пригодным; торопить пользователя незачем.
+            owner = "";
+            if (!fsrarIdField.getText().isEmpty()) {
+                fsrarIdField.setText("");
+                log("Не удалось прочитать FSRAR_ID организации: " + e.getMessage());
+            }
+            return;
+        }
+        if (owner.equals(fsrarIdField.getText())) {
+            // Значение не изменилось — не засоряем журнал повторными записями.
+            return;
+        }
+        fsrarIdField.setText(owner);
+        if (owner.isEmpty()) {
+            log("В файле остатков не найден FSRAR_ID организации.");
+        } else {
+            log("FSRAR_ID организации взят из файла остатков: " + owner);
         }
     }
 
     /**
      * Восстанавливает пути, выбранные при прошлом запуске, если они ещё существуют,
-     * а также постоянные данные акта: FSRAR_ID, номер и причину списания.
-     * Дата и примечание не запоминаются — они привязаны к текущему дню.
+     * а также номер и причину списания. Дата и примечание не запоминаются — они
+     * привязаны к текущему дню, а FSRAR_ID всегда берётся из файла остатков.
      */
     private void restorePreferences() {
         String lastInput = readPreference(PREF_LAST_INPUT_FILE);
@@ -685,10 +716,6 @@ public class MainFrame extends JFrame {
                 outputField.setText(directory.getAbsolutePath());
             }
         }
-        String savedFsrarId = readPreference(PREF_FSRAR_ID);
-        if (savedFsrarId != null && !savedFsrarId.trim().isEmpty()) {
-            fsrarIdField.setText(savedFsrarId);
-        }
         String savedActNumber = readPreference(PREF_ACT_NUMBER);
         if (savedActNumber != null && !savedActNumber.trim().isEmpty()) {
             actNumberField.setText(savedActNumber);
@@ -697,7 +724,7 @@ public class MainFrame extends JFrame {
         if (savedTypeWriteOff != null && !savedTypeWriteOff.trim().isEmpty()) {
             typeWriteOffField.setText(savedTypeWriteOff);
         }
-        fillFsrarIdFromInput(currentInputFile());
+        updateFsrarIdFromInput(currentInputFile());
         updateButtons();
     }
 }
