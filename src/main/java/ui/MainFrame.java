@@ -17,6 +17,7 @@ import java.io.File;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.prefs.Preferences;
@@ -41,11 +42,14 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingWorker;
 import javax.swing.TransferHandler;
 import javax.swing.UIManager;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import core.ActHeader;
 import core.GenerationException;
 import core.GenerationResult;
+import core.UtmSender;
 import core.WriteOffService;
 import helpers.Constants;
 import helpers.XmlSupport;
@@ -64,6 +68,7 @@ public class MainFrame extends JFrame {
     private static final String PREF_LAST_OUTPUT_DIR = "lastOutputDir";
     private static final String PREF_ACT_NUMBER = "actNumber";
     private static final String PREF_TYPE_WRITE_OFF = "typeWriteOff";
+    private static final String PREF_UTM_ADDRESS = "utmAddress";
 
     private final Preferences preferences = Preferences.userNodeForPackage(MainFrame.class);
 
@@ -74,6 +79,7 @@ public class MainFrame extends JFrame {
     private final JTextField actDateField = new JTextField();
     private final JTextField typeWriteOffField = new JTextField();
     private final JTextField noteField = new JTextField();
+    private final JTextField utmAddressField = new JTextField();
     private final JCheckBox strongCheckBox = new JCheckBox("Крепкий алкоголь — ActWriteOffStrong.xml", true);
     private final JCheckBox beerCheckBox = new JCheckBox("Пиво и пивные напитки — ActWriteOffBeer.xml", true);
     private final JTextArea logArea = new JTextArea();
@@ -83,21 +89,25 @@ public class MainFrame extends JFrame {
     private final JButton browseInputButton = new JButton("Обзор…");
     private final JButton browseOutputButton = new JButton("Обзор…");
     private final JButton generateButton = new JButton("Сформировать акты");
+    private final JButton sendToUtmButton = new JButton("Отправить в УТМ");
     private final JButton openFolderButton = new JButton("Открыть папку");
     private final JMenuItem chooseInputItem = new JMenuItem("Выбрать файл остатков…");
     private final JMenuItem chooseOutputItem = new JMenuItem("Выбрать папку результата…");
 
+    /** Файлы, сформированные последним запуском: их и предлагается отправить в УТМ. */
+    private final List<File> lastGeneratedFiles = new ArrayList<>();
+
     public MainFrame() {
         super(Constants.APP_NAME);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(760, 640));
+        setMinimumSize(new Dimension(760, 700));
         buildUi();
         initActHeaderDefaults();
         wireActions();
         installDropTarget();
         restorePreferences();
         pack();
-        setSize(900, 720);
+        setSize(900, 780);
         setLocationRelativeTo(null);
     }
 
@@ -200,6 +210,17 @@ public class MainFrame extends JFrame {
         optionsConstraints.insets = new Insets(10, 0, 0, 0);
         form.add(options, optionsConstraints);
 
+        // Отправка в УТМ
+        JPanel utmPanel = buildUtmPanel();
+
+        GridBagConstraints utmConstraints = new GridBagConstraints();
+        utmConstraints.gridx = 0;
+        utmConstraints.gridy = 4;
+        utmConstraints.gridwidth = 3;
+        utmConstraints.fill = GridBagConstraints.HORIZONTAL;
+        utmConstraints.insets = new Insets(10, 0, 0, 0);
+        form.add(utmPanel, utmConstraints);
+
         // Кнопки
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttons.add(generateButton);
@@ -208,13 +229,52 @@ public class MainFrame extends JFrame {
 
         GridBagConstraints buttonsConstraints = new GridBagConstraints();
         buttonsConstraints.gridx = 0;
-        buttonsConstraints.gridy = 4;
+        buttonsConstraints.gridy = 5;
         buttonsConstraints.gridwidth = 3;
         buttonsConstraints.anchor = GridBagConstraints.WEST;
         buttonsConstraints.insets = new Insets(10, 0, 0, 0);
         form.add(buttons, buttonsConstraints);
 
         return form;
+    }
+
+    /**
+     * Панель отправки акта в УТМ: адрес модуля и кнопка отправки.
+     * <p>
+     * Акт передаётся утилитой curl по адресу
+     * {@code <адрес УТМ>/opt/in/ActWriteOff_v3} — так же, как в документации ЕГАИС:
+     * <pre>
+     * curl -F "xml_file=@client.xml" http://localhost:8080/opt/in/ActWriteOff_v3
+     * </pre>
+     */
+    private JPanel buildUtmPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Отправка в УТМ"));
+
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.anchor = GridBagConstraints.WEST;
+        labelConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints fieldConstraints = new GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
+        fieldConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints buttonConstraints = new GridBagConstraints();
+        buttonConstraints.gridx = 2;
+        buttonConstraints.insets = new Insets(3, 0, 3, 0);
+
+        utmAddressField.setText(Constants.DEFAULT_UTM_ADDRESS);
+        utmAddressField.setToolTipText("Адрес УТМ, например " + Constants.DEFAULT_UTM_ADDRESS
+                + ". Путь " + Constants.UTM_ACT_WRITE_OFF_PATH + " дописывается автоматически.");
+
+        addRow(panel, new JLabel("Адрес УТМ:"), utmAddressField, sendToUtmButton, 0,
+                labelConstraints, fieldConstraints, buttonConstraints);
+        sendToUtmButton.setToolTipText("Отправить сформированные акты в УТМ");
+
+        return panel;
     }
 
     /**
@@ -317,9 +377,27 @@ public class MainFrame extends JFrame {
         chooseInputItem.addActionListener(this::chooseInputFile);
         chooseOutputItem.addActionListener(this::chooseOutputDirectory);
         generateButton.addActionListener(e -> generate());
+        sendToUtmButton.addActionListener(e -> sendToUtm());
         openFolderButton.addActionListener(e -> openOutputFolder());
         strongCheckBox.addActionListener(e -> updateButtons());
         beerCheckBox.addActionListener(e -> updateButtons());
+        // Адрес УТМ можно править вручную, поэтому кнопку отправки обновляем по мере ввода.
+        utmAddressField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+        });
         // Путь можно не только выбрать в диалоге, но и вписать руками,
         // поэтому FSRAR_ID обновляем ещё и при уходе фокуса с поля файла.
         inputField.addFocusListener(new FocusAdapter() {
@@ -439,6 +517,10 @@ public class MainFrame extends JFrame {
                 setBusy(false);
                 try {
                     GenerationResult result = get();
+                    // Запоминаем, что сформировано в этот раз: именно эти файлы предлагается отправить в УТМ.
+                    lastGeneratedFiles.clear();
+                    lastGeneratedFiles.addAll(result.getWrittenFiles());
+                    updateButtons();
                     log(String.format("Готово. Позиций обработано: %d (крепкий алкоголь — %d, пиво — %d).",
                             result.getTotalPositions(), result.getStrongPositions(), result.getBeerPositions()));
                     setStatus("Готово: обработано позиций — " + result.getTotalPositions());
@@ -476,6 +558,183 @@ public class MainFrame extends JFrame {
         return builder.toString();
     }
 
+    // ------------------------------------------------------------------
+    // Отправка в УТМ
+    // ------------------------------------------------------------------
+
+    /**
+     * Отправляет сформированные акты в УТМ утилитой curl.
+     * <p>
+     * Каждый файл передаётся отдельной командой вида
+     * {@code curl -F "xml_file=@client.xml" <адрес УТМ>/opt/in/ActWriteOff_v3}.
+     */
+    private void sendToUtm() {
+        final List<File> files = filesToSend();
+        if (files.isEmpty()) {
+            showWarning("Отправлять пока нечего: сначала сформируйте акты.");
+            return;
+        }
+
+        final String url;
+        try {
+            url = UtmSender.endpoint(utmAddressField.getText());
+        } catch (GenerationException e) {
+            showWarning(e.getMessage());
+            return;
+        }
+
+        if (lastGeneratedFiles.isEmpty() && !confirmSendingFoundFiles(files)) {
+            return;
+        }
+
+        writePreference(PREF_UTM_ADDRESS, utmAddressField.getText().trim());
+
+        setBusy(true);
+        log("――― Отправка актов в УТМ ―――");
+
+        new SwingWorker<List<UtmSender.SendResult>, String>() {
+            @Override
+            protected List<UtmSender.SendResult> doInBackground() throws Exception {
+                UtmSender sender = new UtmSender();
+                List<UtmSender.SendResult> results = new ArrayList<>();
+                publish("Команда: curl -F \"" + Constants.UTM_FORM_FIELD + "=@"
+                        + Constants.UTM_UPLOAD_FILE_NAME + "\" " + url);
+                for (File file : files) {
+                    publish("Отправляю " + file.getName() + " …");
+                    UtmSender.SendResult result = sender.send(file, url);
+                    results.add(result);
+                    if (result.getOutput().isEmpty()) {
+                        publish("  ответ УТМ: пусто, код возврата " + result.getExitCode() + ".");
+                    } else {
+                        publish("  ответ УТМ (код возврата " + result.getExitCode() + "):");
+                        for (String line : result.getOutput().split("\\R")) {
+                            if (!line.trim().isEmpty()) {
+                                publish("    " + line.trim());
+                            }
+                        }
+                    }
+                }
+                return results;
+            }
+
+            @Override
+            protected void process(List<String> chunks) {
+                for (String message : chunks) {
+                    log(message);
+                }
+            }
+
+            @Override
+            protected void done() {
+                setBusy(false);
+                try {
+                    List<UtmSender.SendResult> results = get();
+                    List<String> rejected = new ArrayList<>();
+                    for (UtmSender.SendResult result : results) {
+                        if (!result.isSuccess()) {
+                            rejected.add(result.getFile().getName());
+                        }
+                    }
+                    if (rejected.isEmpty()) {
+                        log("Отправка в УТМ завершена: файлов — " + results.size() + ".");
+                        setStatus("Отправлено в УТМ: " + results.size());
+                        JOptionPane.showMessageDialog(MainFrame.this,
+                                buildUtmSuccessMessage(results), "Отправка в УТМ",
+                                JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        log("ОШИБКА: curl не смог отправить файлы: " + String.join(", ", rejected));
+                        setStatus("Ошибка отправки в УТМ");
+                        JOptionPane.showMessageDialog(MainFrame.this,
+                                buildUtmFailureMessage(results, rejected), "Отправка в УТМ",
+                                JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log("Отправка в УТМ прервана.");
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    String message = cause instanceof GenerationException && cause.getMessage() != null
+                            ? cause.getMessage()
+                            : String.valueOf(cause);
+                    log("ОШИБКА: " + message);
+                    setStatus("Ошибка отправки");
+                    JOptionPane.showMessageDialog(MainFrame.this, message, "Отправка в УТМ",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    /**
+     * Спрашивает подтверждение, если отправлять предстоит файлы, найденные в папке
+     * результата, а не сформированные в этом запуске: там мог остаться акт от другой
+     * организации или другой даты.
+     */
+    private boolean confirmSendingFoundFiles(List<File> files) {
+        StringBuilder question = new StringBuilder("Эти файлы найдены в папке результата,"
+                + " но сформированы не в этом запуске:\n\n");
+        for (File file : files) {
+            question.append(file.getName()).append("  —  ").append(file.getAbsolutePath()).append('\n');
+        }
+        question.append("\nОтправить их в УТМ?");
+        return JOptionPane.showConfirmDialog(this, question.toString(), "Отправка в УТМ",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE) == JOptionPane.OK_OPTION;
+    }
+
+    /**
+     * Файлы для отправки: сформированные последним запуском, а если их нет —
+     * найденные в папке результата.
+     */
+    private List<File> filesToSend() {
+        List<File> files = new ArrayList<>();
+        for (File file : lastGeneratedFiles) {
+            if (file.isFile()) {
+                files.add(file);
+            }
+        }
+        if (!files.isEmpty()) {
+            return files;
+        }
+        File directory = currentOutputDirectory();
+        if (directory == null || !directory.isDirectory()) {
+            return files;
+        }
+        for (String name : new String[]{Constants.OUTPUT_FILE_STRONG, Constants.OUTPUT_FILE_BEER}) {
+            File file = new File(directory, name);
+            if (file.isFile()) {
+                files.add(file);
+            }
+        }
+        return files;
+    }
+
+    private String buildUtmSuccessMessage(List<UtmSender.SendResult> results) {
+        StringBuilder builder = new StringBuilder("Файлы отправлены в УТМ.\n\n");
+        for (UtmSender.SendResult result : results) {
+            builder.append(result.getFile().getName())
+                    .append("  —  curl вернул ").append(result.getExitCode()).append('\n');
+        }
+        builder.append("\nАдрес приёма: ").append(results.get(0).getUrl());
+        builder.append("\n\nОтвет УТМ показан в журнале работы.");
+        return builder.toString();
+    }
+
+    private String buildUtmFailureMessage(List<UtmSender.SendResult> results, List<String> rejected) {
+        StringBuilder builder = new StringBuilder("curl не смог отправить файлы: ");
+        builder.append(String.join(", ", rejected)).append("\n\n");
+        for (UtmSender.SendResult result : results) {
+            if (!result.isSuccess()) {
+                builder.append(result.getFile().getName())
+                        .append("  —  код возврата ").append(result.getExitCode()).append('\n');
+                if (!result.getOutput().isEmpty()) {
+                    builder.append(result.getOutput()).append('\n');
+                }
+            }
+        }
+        builder.append("\nПроверьте адрес УТМ и доступность сервера: ").append(results.get(0).getUrl());
+        return builder.toString();
+    }
+
     private void openOutputFolder() {
         File directory = currentOutputDirectory();
         if (directory == null || !directory.isDirectory()) {
@@ -501,7 +760,9 @@ public class MainFrame extends JFrame {
                         + "Данные акта (FSRAR_ID, номер, дата, причина, примечание)\n"
                         + "задаются в окне и попадают в шапку документа.\n\n"
                         + "Результат: ActWriteOffStrong.xml и ActWriteOffBeer.xml\n"
-                        + "в выбранной папке.",
+                        + "в выбранной папке.\n\n"
+                        + "Готовые акты можно отправить в УТМ утилитой curl\n"
+                        + "по адресу из поля «Адрес УТМ».",
                 "О программе",
                 JOptionPane.INFORMATION_MESSAGE);
     }
@@ -561,6 +822,7 @@ public class MainFrame extends JFrame {
 
     private void setBusy(boolean busy) {
         generateButton.setEnabled(!busy && canGenerate());
+        sendToUtmButton.setEnabled(!busy && canSend());
         browseInputButton.setEnabled(!busy);
         browseOutputButton.setEnabled(!busy);
         chooseInputItem.setEnabled(!busy);
@@ -572,6 +834,7 @@ public class MainFrame extends JFrame {
         actDateField.setEnabled(!busy);
         typeWriteOffField.setEnabled(!busy);
         noteField.setEnabled(!busy);
+        utmAddressField.setEnabled(!busy);
         progressBar.setVisible(busy);
         progressBar.setIndeterminate(busy);
         setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
@@ -582,6 +845,7 @@ public class MainFrame extends JFrame {
 
     private void updateButtons() {
         generateButton.setEnabled(canGenerate());
+        sendToUtmButton.setEnabled(canSend());
         openFolderButton.setEnabled(currentOutputDirectory() != null
                 && currentOutputDirectory().isDirectory());
     }
@@ -590,6 +854,11 @@ public class MainFrame extends JFrame {
         return !inputField.getText().trim().isEmpty()
                 && !outputField.getText().trim().isEmpty()
                 && (strongCheckBox.isSelected() || beerCheckBox.isSelected());
+    }
+
+    /** Отправка возможна, когда задан адрес УТМ и есть что отправлять. */
+    private boolean canSend() {
+        return !utmAddressField.getText().trim().isEmpty() && !filesToSend().isEmpty();
     }
 
     private File currentInputFile() {
@@ -723,6 +992,10 @@ public class MainFrame extends JFrame {
         String savedTypeWriteOff = readPreference(PREF_TYPE_WRITE_OFF);
         if (savedTypeWriteOff != null && !savedTypeWriteOff.trim().isEmpty()) {
             typeWriteOffField.setText(savedTypeWriteOff);
+        }
+        String savedUtmAddress = readPreference(PREF_UTM_ADDRESS);
+        if (savedUtmAddress != null && !savedUtmAddress.trim().isEmpty()) {
+            utmAddressField.setText(savedUtmAddress);
         }
         updateFsrarIdFromInput(currentInputFile());
         updateButtons();

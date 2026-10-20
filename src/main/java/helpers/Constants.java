@@ -94,4 +94,21 @@ public final class Constants {
 
     public static final String OUTPUT_FILE_STRONG = "ActWriteOffStrong.xml";
     public static final String OUTPUT_FILE_BEER = "ActWriteOffBeer.xml";
+
+    // --- Отправка акта в УТМ ---
+
+    /** Адрес УТМ по умолчанию (поле «Адрес УТМ» предзаполняется этим значением). */
+    public static final String DEFAULT_UTM_ADDRESS = "http://localhost:8080";
+
+    /** Путь приёма актов списания в УТМ; дописывается к адресу УТМ. */
+    public static final String UTM_ACT_WRITE_OFF_PATH = "/opt/in/ActWriteOff_v3";
+
+    /** Имя файла, под которым акт передаётся в УТМ. */
+    public static final String UTM_UPLOAD_FILE_NAME = "client.xml";
+
+    /** Имя поля формы, в котором УТМ ожидает файл акта. */
+    public static final String UTM_FORM_FIELD = "xml_file";
+
+    /** Сколько секунд ждать ответа УТМ, прежде чем прекратить отправку. */
+    public static final int UTM_TIMEOUT_SECONDS = 60;
 }
