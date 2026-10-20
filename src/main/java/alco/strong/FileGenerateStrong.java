@@ -3,19 +3,14 @@ package alco.strong;
 import java.io.File;
 import java.util.List;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
+import core.ActDocumentBuilder;
+import core.ActHeader;
 import core.GenerationException;
 import helpers.XmlSupport;
 
-import static helpers.Constants.NAMESPACE_CE;
 import static helpers.Constants.TAG_AMC;
-import static helpers.Constants.TAG_CONTENT;
 import static helpers.Constants.TAG_F2_REG_ID;
 import static helpers.Constants.TAG_IDENTITY;
 import static helpers.Constants.TAG_INFORM_F1F2;
@@ -35,44 +30,30 @@ public class FileGenerateStrong {
      * Записывает акт списания в указанный файл.
      *
      * @param actPositionStrong позиции акта
+     * @param header            данные шапки акта (номер, дата, причина, примечание, FSRAR_ID)
      * @param outputFile        файл результата (родительские каталоги создаются автоматически)
      * @return количество сформированных марок
      * @throws GenerationException если файл не удалось записать или количество некорректно
      */
-    public int generateXmlFile(List<ActPositionStrong> actPositionStrong, File outputFile) throws GenerationException {
+    public int generateXmlFile(List<ActPositionStrong> actPositionStrong, ActHeader header, File outputFile)
+            throws GenerationException {
         int totalMarks = 0;
         try {
-            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
-            Document doc = dBuilder.newDocument();
-            Element rootElement = doc.createElement(TAG_CONTENT);
-            doc.appendChild(rootElement);
+            ActDocumentBuilder builder = new ActDocumentBuilder(header);
+            Element content = builder.content();
 
             for (ActPositionStrong actPositionsStrong : actPositionStrong) {
 
-                Element position = doc.createElement(TAG_POSITION);
-                rootElement.appendChild(position);
+                Element position = builder.appendChild(content, TAG_POSITION);
 
-                Element identity = doc.createElement(TAG_IDENTITY);
-                identity.appendChild(doc.createTextNode(String.valueOf(actPositionsStrong.getNumber())));
-                position.appendChild(identity);
+                builder.appendText(position, TAG_IDENTITY, String.valueOf(actPositionsStrong.getNumber()));
+                builder.appendText(position, TAG_QUANTITY, actPositionsStrong.getQuantity());
 
-                Element quantity = doc.createElement(TAG_QUANTITY);
-                quantity.appendChild(doc.createTextNode(actPositionsStrong.getQuantity()));
-                position.appendChild(quantity);
+                Element informF1F2 = builder.appendChild(position, TAG_INFORM_F1F2);
+                Element markCodeInfo = builder.appendChild(position, TAG_MARK_CODE_INFO);
 
-                Element informF1F2 = doc.createElement(TAG_INFORM_F1F2);
-                position.appendChild(informF1F2);
-
-                Element markCodeInfo = doc.createElement(TAG_MARK_CODE_INFO);
-                position.appendChild(markCodeInfo);
-
-                Element informF2 = doc.createElement(TAG_INFORM_F2);
-                informF1F2.appendChild(informF2);
-
-                Element f2RegId = doc.createElement(TAG_F2_REG_ID);
-                f2RegId.appendChild(doc.createTextNode(actPositionsStrong.getFb()));
-                informF2.appendChild(f2RegId);
+                Element informF2 = builder.appendChild(informF1F2, TAG_INFORM_F2);
+                builder.appendText(informF2, TAG_F2_REG_ID, actPositionsStrong.getFb());
 
                 int marks;
                 try {
@@ -83,19 +64,15 @@ public class FileGenerateStrong {
                 }
 
                 for (int i = 0; i < marks; i++) {
-                    Element amc = doc.createElement(TAG_AMC);
                     String markPos = markGenerate.numberingMark(actPositionsStrong, i + 1);
-                    amc.appendChild(doc.createTextNode(markPos));
-                    markCodeInfo.appendChild(amc);
-
-                    Attr attr = doc.createAttribute("xmlns:ce");
-                    attr.setValue(NAMESPACE_CE);
-                    amc.setAttributeNode(attr);
+                    // Пространство имён ce объявлено один раз в корне документа
+                    // (ActDocumentBuilder), поэтому на каждом ce:amc оно не повторяется.
+                    builder.appendText(markCodeInfo, TAG_AMC, markPos);
                 }
                 totalMarks += marks;
             }
 
-            XmlSupport.write(doc, outputFile);
+            XmlSupport.write(builder.document(), outputFile);
             return totalMarks;
         } catch (GenerationException e) {
             throw e;

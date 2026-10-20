@@ -3,16 +3,13 @@ package alco.beer;
 import java.io.File;
 import java.util.List;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
+import core.ActDocumentBuilder;
+import core.ActHeader;
 import core.GenerationException;
 import helpers.XmlSupport;
 
-import static helpers.Constants.TAG_CONTENT;
 import static helpers.Constants.TAG_F2_REG_ID;
 import static helpers.Constants.TAG_IDENTITY;
 import static helpers.Constants.TAG_INFORM_F1F2;
@@ -29,42 +26,29 @@ public class FileGenerateBeer {
      * Записывает акт списания в указанный файл.
      *
      * @param actPositionBeer позиции акта
+     * @param header          данные шапки акта (номер, дата, причина, примечание, FSRAR_ID)
      * @param outputFile      файл результата (родительские каталоги создаются автоматически)
      * @throws GenerationException если файл не удалось записать
      */
-    public void generateXmlFileBeer(List<ActPositionBeer> actPositionBeer, File outputFile) throws GenerationException {
+    public void generateXmlFileBeer(List<ActPositionBeer> actPositionBeer, ActHeader header, File outputFile)
+            throws GenerationException {
         try {
-            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
-            Document doc = dBuilder.newDocument();
-            Element rootElement = doc.createElement(TAG_CONTENT);
-            doc.appendChild(rootElement);
+            ActDocumentBuilder builder = new ActDocumentBuilder(header);
+            Element content = builder.content();
 
             for (ActPositionBeer actPositionsBeer : actPositionBeer) {
 
-                Element position = doc.createElement(TAG_POSITION);
-                rootElement.appendChild(position);
+                Element position = builder.appendChild(content, TAG_POSITION);
 
-                Element identity = doc.createElement(TAG_IDENTITY);
-                identity.appendChild(doc.createTextNode(String.valueOf(actPositionsBeer.getNumber())));
-                position.appendChild(identity);
+                builder.appendText(position, TAG_IDENTITY, String.valueOf(actPositionsBeer.getNumber()));
+                builder.appendText(position, TAG_QUANTITY, actPositionsBeer.getQuantity());
 
-                Element quantity = doc.createElement(TAG_QUANTITY);
-                quantity.appendChild(doc.createTextNode(actPositionsBeer.getQuantity()));
-                position.appendChild(quantity);
-
-                Element informF1F2 = doc.createElement(TAG_INFORM_F1F2);
-                position.appendChild(informF1F2);
-
-                Element informF2 = doc.createElement(TAG_INFORM_F2);
-                informF1F2.appendChild(informF2);
-
-                Element f2RegId = doc.createElement(TAG_F2_REG_ID);
-                f2RegId.appendChild(doc.createTextNode(actPositionsBeer.getFb()));
-                informF2.appendChild(f2RegId);
+                Element informF1F2 = builder.appendChild(position, TAG_INFORM_F1F2);
+                Element informF2 = builder.appendChild(informF1F2, TAG_INFORM_F2);
+                builder.appendText(informF2, TAG_F2_REG_ID, actPositionsBeer.getFb());
             }
 
-            XmlSupport.write(doc, outputFile);
+            XmlSupport.write(builder.document(), outputFile);
         } catch (GenerationException e) {
             throw e;
         } catch (Exception e) {

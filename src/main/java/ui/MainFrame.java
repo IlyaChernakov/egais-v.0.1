@@ -12,6 +12,7 @@ import java.awt.datatransfer.DataFlavor;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -40,10 +41,12 @@ import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import core.ActHeader;
 import core.GenerationException;
 import core.GenerationResult;
 import core.WriteOffService;
 import helpers.Constants;
+import helpers.XmlSupport;
 
 /**
  * Главное окно программы: выбор файла остатков, выбор папки результата
@@ -57,11 +60,19 @@ public class MainFrame extends JFrame {
     private static final String PREF_LAST_INPUT_FILE = "lastInputFile";
     private static final String PREF_LAST_INPUT_DIR = "lastInputDir";
     private static final String PREF_LAST_OUTPUT_DIR = "lastOutputDir";
+    private static final String PREF_FSRAR_ID = "fsrarId";
+    private static final String PREF_ACT_NUMBER = "actNumber";
+    private static final String PREF_TYPE_WRITE_OFF = "typeWriteOff";
 
     private final Preferences preferences = Preferences.userNodeForPackage(MainFrame.class);
 
     private final JTextField inputField = new JTextField();
     private final JTextField outputField = new JTextField();
+    private final JTextField fsrarIdField = new JTextField();
+    private final JTextField actNumberField = new JTextField();
+    private final JTextField actDateField = new JTextField();
+    private final JTextField typeWriteOffField = new JTextField();
+    private final JTextField noteField = new JTextField();
     private final JCheckBox strongCheckBox = new JCheckBox("Крепкий алкоголь — ActWriteOffStrong.xml", true);
     private final JCheckBox beerCheckBox = new JCheckBox("Пиво и пивные напитки — ActWriteOffBeer.xml", true);
     private final JTextArea logArea = new JTextArea();
@@ -78,14 +89,26 @@ public class MainFrame extends JFrame {
     public MainFrame() {
         super(Constants.APP_NAME);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(720, 520));
+        setMinimumSize(new Dimension(760, 640));
         buildUi();
+        initActHeaderDefaults();
         wireActions();
         installDropTarget();
         restorePreferences();
         pack();
-        setSize(860, 620);
+        setSize(900, 720);
         setLocationRelativeTo(null);
+    }
+
+    /**
+     * Заполняет поля шапки акта значениями по умолчанию: сегодняшняя дата,
+     * причина «Порча» и типовое примечание вместе с той же датой.
+     */
+    private void initActHeaderDefaults() {
+        LocalDate today = LocalDate.now();
+        actDateField.setText(today.format(ActHeader.USER_DATE));
+        typeWriteOffField.setText(Constants.DEFAULT_TYPE_WRITE_OFF);
+        noteField.setText(ActHeader.defaultNote(today));
     }
 
     // ------------------------------------------------------------------
@@ -151,6 +174,17 @@ public class MainFrame extends JFrame {
                 labelConstraints, fieldConstraints, buttonConstraints);
         outputField.setToolTipText("Каталог, в который будут сохранены акты списания");
 
+        // Данные акта
+        JPanel actHeaderPanel = buildActHeaderPanel();
+
+        GridBagConstraints actHeaderConstraints = new GridBagConstraints();
+        actHeaderConstraints.gridx = 0;
+        actHeaderConstraints.gridy = 2;
+        actHeaderConstraints.gridwidth = 3;
+        actHeaderConstraints.fill = GridBagConstraints.HORIZONTAL;
+        actHeaderConstraints.insets = new Insets(10, 0, 0, 0);
+        form.add(actHeaderPanel, actHeaderConstraints);
+
         // Что формировать
         JPanel options = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
         options.setBorder(BorderFactory.createTitledBorder("Что формировать"));
@@ -159,7 +193,7 @@ public class MainFrame extends JFrame {
 
         GridBagConstraints optionsConstraints = new GridBagConstraints();
         optionsConstraints.gridx = 0;
-        optionsConstraints.gridy = 2;
+        optionsConstraints.gridy = 3;
         optionsConstraints.gridwidth = 3;
         optionsConstraints.fill = GridBagConstraints.HORIZONTAL;
         optionsConstraints.insets = new Insets(10, 0, 0, 0);
@@ -173,13 +207,59 @@ public class MainFrame extends JFrame {
 
         GridBagConstraints buttonsConstraints = new GridBagConstraints();
         buttonsConstraints.gridx = 0;
-        buttonsConstraints.gridy = 3;
+        buttonsConstraints.gridy = 4;
         buttonsConstraints.gridwidth = 3;
         buttonsConstraints.anchor = GridBagConstraints.WEST;
         buttonsConstraints.insets = new Insets(10, 0, 0, 0);
         form.add(buttons, buttonsConstraints);
 
         return form;
+    }
+
+    /**
+     * Панель с данными шапки акта — они попадают в конверт документа
+     * {@code ns:Documents} (см. образец {@code files/1.xml}).
+     */
+    private JPanel buildActHeaderPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Данные акта"));
+
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.anchor = GridBagConstraints.WEST;
+        labelConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints fieldConstraints = new GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
+        fieldConstraints.insets = new Insets(3, 0, 3, 0);
+
+        addHeaderRow(panel, "FSRAR_ID организации:", fsrarIdField, 0, labelConstraints, fieldConstraints);
+        fsrarIdField.setToolTipText("Код организации в ЕГАИС, только цифры. "
+                + "Если файл остатков уже выбран, подставляется из него автоматически.");
+
+        addHeaderRow(panel, "Номер акта:", actNumberField, 1, labelConstraints, fieldConstraints);
+        actNumberField.setToolTipText("Номер акта; он же записывается в awr:Identity документа");
+
+        addHeaderRow(panel, "Дата списания (ДД-ММ-ГГГГ):", actDateField, 2, labelConstraints, fieldConstraints);
+        actDateField.setToolTipText("Дата акта; принимается и формат ГГГГ-ММ-ДД");
+
+        addHeaderRow(panel, "Причина списания:", typeWriteOffField, 3, labelConstraints, fieldConstraints);
+        typeWriteOffField.setToolTipText("Значение awr:TypeWriteOff. Пустое поле — тег в акт не записывается.");
+
+        addHeaderRow(panel, "Примечание:", noteField, 4, labelConstraints, fieldConstraints);
+        noteField.setToolTipText("Значение awr:Note. Пустое поле — тег в акт не записывается.");
+
+        return panel;
+    }
+
+    private void addHeaderRow(JPanel panel, String labelText, JTextField field, int row,
+                              GridBagConstraints labelConstraints, GridBagConstraints fieldConstraints) {
+        labelConstraints.gridy = row;
+        fieldConstraints.gridy = row;
+        panel.add(new JLabel(labelText), labelConstraints);
+        panel.add(field, fieldConstraints);
     }
 
     private void addRow(JPanel form, JLabel label, JTextField field, JButton button, int row,
@@ -259,6 +339,7 @@ public class MainFrame extends JFrame {
             outputField.setText(selected.getParentFile().getAbsolutePath());
         }
         log("Выбран файл остатков: " + selected.getAbsolutePath());
+        fillFsrarIdFromInput(selected);
         updateButtons();
     }
 
@@ -302,9 +383,22 @@ public class MainFrame extends JFrame {
             return;
         }
 
+        ActHeader header;
+        try {
+            header = ActHeader.of(fsrarIdField.getText(), actNumberField.getText(),
+                    actDateField.getText(), typeWriteOffField.getText(), noteField.getText());
+            header.validate();
+        } catch (GenerationException e) {
+            showWarning(e.getMessage());
+            return;
+        }
+
         writePreference(PREF_LAST_INPUT_FILE, inputFile);
         writePreference(PREF_LAST_INPUT_DIR, inputFile.getParentFile());
         writePreference(PREF_LAST_OUTPUT_DIR, outputDirectory);
+        writePreference(PREF_FSRAR_ID, header.getFsrarId());
+        writePreference(PREF_ACT_NUMBER, header.getActNumber());
+        writePreference(PREF_TYPE_WRITE_OFF, header.getTypeWriteOff());
 
         setBusy(true);
         log("――― Начало формирования актов ―――");
@@ -313,7 +407,7 @@ public class MainFrame extends JFrame {
             @Override
             protected GenerationResult doInBackground() throws Exception {
                 WriteOffService service = new WriteOffService().withLogger(this::publish);
-                return service.generate(inputFile, outputDirectory, strong, beer);
+                return service.generate(inputFile, outputDirectory, header, strong, beer);
             }
 
             @Override
@@ -387,6 +481,8 @@ public class MainFrame extends JFrame {
                 Constants.APP_NAME + "\nВерсия " + Constants.APP_VERSION + "\n\n"
                         + "Формирует акты списания по крепкому алкоголю и пиву\n"
                         + "на основании выгрузки текущих остатков из ЕГАИС (ReplyRests_v2.xml).\n\n"
+                        + "Данные акта (FSRAR_ID, номер, дата, причина, примечание)\n"
+                        + "задаются в окне и попадают в шапку документа.\n\n"
                         + "Результат: ActWriteOffStrong.xml и ActWriteOffBeer.xml\n"
                         + "в выбранной папке.",
                 "О программе",
@@ -430,6 +526,7 @@ public class MainFrame extends JFrame {
                             outputField.setText(file.getParentFile().getAbsolutePath());
                         }
                         log("Выбран файл остатков: " + file.getAbsolutePath());
+                        fillFsrarIdFromInput(file);
                     }
                     updateButtons();
                     return true;
@@ -453,6 +550,11 @@ public class MainFrame extends JFrame {
         chooseOutputItem.setEnabled(!busy);
         strongCheckBox.setEnabled(!busy);
         beerCheckBox.setEnabled(!busy);
+        fsrarIdField.setEnabled(!busy);
+        actNumberField.setEnabled(!busy);
+        actDateField.setEnabled(!busy);
+        typeWriteOffField.setEnabled(!busy);
+        noteField.setEnabled(!busy);
         progressBar.setVisible(busy);
         progressBar.setIndeterminate(busy);
         setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
@@ -531,8 +633,42 @@ public class MainFrame extends JFrame {
         }
     }
 
+    private void writePreference(String key, String value) {
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        try {
+            preferences.put(key, value);
+        } catch (RuntimeException e) {
+            // Настройки не критичны: если их не удалось сохранить, программа продолжает работу.
+        }
+    }
+
     /**
-     * Восстанавливает пути, выбранные при прошлом запуске, если они ещё существуют.
+     * Подставляет FSRAR_ID организации из выбранного файла остатков, если поле ещё пустое.
+     * Код есть в самой выгрузке, поэтому искать его отдельно не нужно.
+     *
+     * @param inputFile выбранный файл остатков
+     */
+    private void fillFsrarIdFromInput(File inputFile) {
+        if (inputFile == null || !inputFile.isFile() || !fsrarIdField.getText().trim().isEmpty()) {
+            return;
+        }
+        try {
+            String owner = XmlSupport.ownerFsrarId(inputFile);
+            if (!owner.isEmpty()) {
+                fsrarIdField.setText(owner);
+                log("FSRAR_ID организации взят из файла остатков: " + owner);
+            }
+        } catch (GenerationException e) {
+            // Файл может быть выбран до того, как он станет пригодным; торопить пользователя незачем.
+        }
+    }
+
+    /**
+     * Восстанавливает пути, выбранные при прошлом запуске, если они ещё существуют,
+     * а также постоянные данные акта: FSRAR_ID, номер и причину списания.
+     * Дата и примечание не запоминаются — они привязаны к текущему дню.
      */
     private void restorePreferences() {
         String lastInput = readPreference(PREF_LAST_INPUT_FILE);
@@ -549,6 +685,19 @@ public class MainFrame extends JFrame {
                 outputField.setText(directory.getAbsolutePath());
             }
         }
+        String savedFsrarId = readPreference(PREF_FSRAR_ID);
+        if (savedFsrarId != null && !savedFsrarId.trim().isEmpty()) {
+            fsrarIdField.setText(savedFsrarId);
+        }
+        String savedActNumber = readPreference(PREF_ACT_NUMBER);
+        if (savedActNumber != null && !savedActNumber.trim().isEmpty()) {
+            actNumberField.setText(savedActNumber);
+        }
+        String savedTypeWriteOff = readPreference(PREF_TYPE_WRITE_OFF);
+        if (savedTypeWriteOff != null && !savedTypeWriteOff.trim().isEmpty()) {
+            typeWriteOffField.setText(savedTypeWriteOff);
+        }
+        fillFsrarIdFromInput(currentInputFile());
         updateButtons();
     }
 }

@@ -43,8 +43,52 @@ public final class Constants {
 
     public static final String TAG_SHOP_POSITION = "rst:ShopPosition";
 
+    // --- Конверт документа акта списания (как в образце files/1.xml) ---
+
+    public static final String TAG_DOCUMENTS = "ns:Documents";
+    public static final String TAG_OWNER = "ns:Owner";
+    public static final String TAG_FSRAR_ID = "ns:FSRAR_ID";
+    public static final String TAG_DOCUMENT = "ns:Document";
+    public static final String TAG_ACT_WRITE_OFF = "ns:ActWriteOff_v3";
+    public static final String TAG_HEADER = "awr:Header";
+    public static final String TAG_ACT_NUMBER = "awr:ActNumber";
+    public static final String TAG_ACT_DATE = "awr:ActDate";
+    public static final String TAG_TYPE_WRITE_OFF = "awr:TypeWriteOff";
+    public static final String TAG_NOTE = "awr:Note";
+
+    /** Атрибут версии формата у корневого элемента. */
+    public static final String ATTR_VERSION = "Version";
+
+    /** Объявление пространства имён марок у элементов {@code ce:amc}. */
+    public static final String ATTR_XMLNS_CE = "xmlns:ce";
+
+    /** Значение версии формата у корневого элемента. */
+    public static final String DOCUMENTS_VERSION = "1.0";
+
+    // --- Пространства имён ---
+
     /** Пространство имён для атрибута формируемых марок. */
     public static final String NAMESPACE_CE = "http://fsrar.ru/WEGAIS/CommonV3";
+
+    /** Служебное пространство имён XML-схемы. */
+    public static final String NAMESPACE_XSI = "http://www.w3.org/2001/XMLSchema-instance";
+
+    /** Основное пространство имён документов ЕГАИС. */
+    public static final String NAMESPACE_DOCUMENTS = "http://fsrar.ru/WEGAIS/WB_DOC_SINGLE_01";
+
+    /** Пространство имён ссылок на продукцию. */
+    public static final String NAMESPACE_PREF = "http://fsrar.ru/WEGAIS/ProductRef_v2";
+
+    /** Пространство имён акта списания. */
+    public static final String NAMESPACE_AWR = "http://fsrar.ru/WEGAIS/ActWriteOff_v3";
+
+    // --- Значения по умолчанию для шапки акта ---
+
+    /** Причина списания по умолчанию. */
+    public static final String DEFAULT_TYPE_WRITE_OFF = "Порча";
+
+    /** Шаблон примечания по умолчанию; %s — дата в формате ДД-ММ-ГГГГ. */
+    public static final String DEFAULT_NOTE_TEMPLATE = "Списание по инвентаризации 1 от %s";
 
     /** Фиксированная (серединная) часть марки. */
     public static final String MID_MARK = "1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD8";

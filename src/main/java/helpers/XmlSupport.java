@@ -68,6 +68,24 @@ public final class XmlSupport {
     }
 
     /**
+     * Читает FSRAR_ID организации из файла выгрузки остатков.
+     * <p>
+     * Код нужен для шапки акта, поэтому программа подставляет его автоматически,
+     * если пользователь ещё не заполнил это поле.
+     *
+     * @param xmlFile файл выгрузки остатков
+     * @return код организации или пустая строка, если его в файле нет
+     * @throws GenerationException если файл недоступен или содержит некорректный XML
+     */
+    public static String ownerFsrarId(File xmlFile) throws GenerationException {
+        NodeList nodes = parse(xmlFile).getElementsByTagName(Constants.TAG_FSRAR_ID);
+        if (nodes.getLength() == 0 || nodes.item(0) == null) {
+            return "";
+        }
+        return nodes.item(0).getTextContent().trim();
+    }
+
+    /**
      * Записывает документ в файл в кодировке UTF-8 с отступами.
      * Родительские каталоги создаются автоматически.
      *

@@ -45,18 +45,23 @@ public class WriteOffService {
      *
      * @param inputFile файл выгрузки остатков (ReplyRests_v2.xml)
      * @param outputDir папка для сохранения результата
+     * @param header    данные шапки акта: FSRAR_ID, номер, дата, причина, примечание
      * @param strong    формировать акт по крепкому алкоголю
      * @param beer      формировать акт по пиву
      * @return итог работы: количество позиций и список записанных файлов
      * @throws GenerationException если данные некорректны или файлы не удалось записать
      */
-    public GenerationResult generate(File inputFile, File outputDir, boolean strong, boolean beer)
+    public GenerationResult generate(File inputFile, File outputDir, ActHeader header, boolean strong, boolean beer)
             throws GenerationException {
 
-        validate(inputFile, outputDir, strong, beer);
+        validate(inputFile, outputDir, header, strong, beer);
 
         logger.accept("Чтение файла остатков: " + inputFile.getAbsolutePath());
         Document document = XmlSupport.parse(inputFile);
+
+        logger.accept(String.format("Акт №%s от %s, FSRAR_ID %s, причина: %s.",
+                header.getActNumber(), header.getActDateUserText(), header.getFsrarId(),
+                header.getTypeWriteOff().isEmpty() ? "не указана" : header.getTypeWriteOff()));
 
         List<File> writtenFiles = new ArrayList<>();
         int strongPositions = 0;
@@ -66,7 +71,7 @@ public class WriteOffService {
         if (strong) {
             List<ActPositionStrong> positions = new XmlParserStrong().parseDocument(document);
             File outputFile = new File(outputDir, Constants.OUTPUT_FILE_STRONG);
-            strongMarks = new FileGenerateStrong().generateXmlFile(positions, outputFile);
+            strongMarks = new FileGenerateStrong().generateXmlFile(positions, header, outputFile);
             strongPositions = positions.size();
             writtenFiles.add(outputFile);
             logger.accept(String.format("Крепкий алкоголь: позиций — %d, марок — %d.", strongPositions, strongMarks));
@@ -79,7 +84,7 @@ public class WriteOffService {
         if (beer) {
             List<ActPositionBeer> positions = new XmlParserBeer().parseDocument(document);
             File outputFile = new File(outputDir, Constants.OUTPUT_FILE_BEER);
-            new FileGenerateBeer().generateXmlFileBeer(positions, outputFile);
+            new FileGenerateBeer().generateXmlFileBeer(positions, header, outputFile);
             beerPositions = positions.size();
             writtenFiles.add(outputFile);
             logger.accept(String.format("Пиво: позиций — %d.", beerPositions));
@@ -92,7 +97,8 @@ public class WriteOffService {
         return new GenerationResult(strongPositions, strongMarks, beerPositions, writtenFiles);
     }
 
-    private void validate(File inputFile, File outputDir, boolean strong, boolean beer) throws GenerationException {
+    private void validate(File inputFile, File outputDir, ActHeader header, boolean strong, boolean beer)
+            throws GenerationException {
         if (inputFile == null) {
             throw new GenerationException("Не выбран файл остатков.");
         }
@@ -113,5 +119,9 @@ public class WriteOffService {
         if (!strong && !beer) {
             throw new GenerationException("Не выбран ни один акт для формирования.");
         }
+        if (header == null) {
+            throw new GenerationException("Не заполнены данные акта.");
+        }
+        header.validate();
     }
 }
