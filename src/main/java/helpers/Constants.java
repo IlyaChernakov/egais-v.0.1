@@ -12,7 +12,7 @@ public final class Constants {
     }
 
     /** Название программы (заголовок окна и диалог «О программе»). */
-    public static final String APP_NAME = "Генерация актов списания ЕГАИС";
+    public static final String APP_NAME = "Генерация документов ЕГАИС";
 
     /** Версия программы. */
     public static final String APP_VERSION = "1.0";
@@ -111,4 +111,38 @@ public final class Constants {
 
     /** Сколько секунд ждать ответа УТМ, прежде чем прекратить отправку. */
     public static final int UTM_TIMEOUT_SECONDS = 60;
+
+    // --- Документ переноса остатков в магазин (TransferToShop) ---
+
+    /** Пространство имён документа переноса остатков в магазин. */
+    public static final String NAMESPACE_TTS = "http://fsrar.ru/WEGAIS/TransferToShop";
+
+    /** Пространство имён общей части документов ЕГАИС — как в образце переноса. */
+    public static final String NAMESPACE_COMMON = "http://fsrar.ru/WEGAIS/Common";
+
+    /** Пространство имён XML-схемы в образце переноса ({@code xmlns:xs}). */
+    public static final String NAMESPACE_XS = "http://www.w3.org/2001/XMLSchema";
+
+    /** Корневой элемент документа переноса внутри конверта {@code ns:Document}. */
+    public static final String TAG_TRANSFER_TO_SHOP = "ns:TransferToShop";
+
+    /** Элементы документа переноса остатков в магазин. */
+    public static final String TTS_CONTENT = "tts:Content";
+    public static final String TTS_POSITION = "tts:Position";
+    public static final String TTS_IDENTITY = "tts:Identity";
+    public static final String TTS_PRODUCT_CODE = "tts:ProductCode";
+    public static final String TTS_QUANTITY = "tts:Quantity";
+    public static final String TTS_INFORM_F2 = "tts:InformF2";
+    public static final String TTS_HEADER = "tts:Header";
+    public static final String TTS_TRANSFER_NUMBER = "tts:TransferNumber";
+    public static final String TTS_TRANSFER_DATE = "tts:TransferDate";
+
+    /** XML-декларация документа переноса — как в образце {@code files-/TransferToShop.xml}. */
+    public static final String XML_DECLARATION_UTF8 = "<?xml version=\"1.0\" encoding=\"utf-8\"?>";
+
+    /** Имя файла результата для документа переноса остатков в магазин. */
+    public static final String OUTPUT_FILE_TRANSFER = "TransferToShop.xml";
+
+    /** Путь приёма документов переноса остатков в магазин в УТМ. */
+    public static final String UTM_TRANSFER_TO_SHOP_PATH = "/opt/in/TransferToShop";
 }

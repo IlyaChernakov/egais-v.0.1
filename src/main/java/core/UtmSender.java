@@ -15,13 +15,17 @@ import java.util.stream.Stream;
 import helpers.Constants;
 
 /**
- * Отправляет сформированный акт списания в УТМ (универсальный транспортный модуль)
+ * Отправляет сформированный документ ЕГАИС в УТМ (универсальный транспортный модуль)
  * утилитой {@code curl}, как это описано в документации ЕГАИС:
  * <pre>
  * curl -F "xml_file=@client.xml" http://localhost:8080/opt/in/ActWriteOff_v3
  * </pre>
  * <p>
- * УТМ принимает акт под именем {@code client.xml}, поэтому файл результата
+ * Путь приёма зависит от типа документа: акт списания отправляется по пути
+ * {@code /opt/in/ActWriteOff_v3}, документ переноса остатков в магазин — по пути
+ * {@code /opt/in/TransferToShop}.
+ * <p>
+ * УТМ принимает документ под именем {@code client.xml}, поэтому файл результата
  * копируется во временный каталог под этим именем, а исходный файл не меняется.
  * Ответ УТМ (обычно XML с квитанцией или текст ошибки) возвращается вызывающему
  * коду для показа пользователю.
@@ -92,21 +96,33 @@ public class UtmSender {
     }
 
     /**
-     * Отправляет акт в УТМ.
+     * Отправляет акт списания в УТМ по пути {@code /opt/in/ActWriteOff_v3}.
      *
      * @param xmlFile файл акта, сформированный программой
-     * @param address адрес УТМ из поля «Адрес УТМ», например {@code http://localhost:8080};
-     *                путь приёма {@code /opt/in/ActWriteOff_v3} дописывается автоматически,
-     *                если его ещё нет в адресе
+     * @param address адрес УТМ из поля «Адрес УТМ», например {@code http://localhost:8080}
      * @return итог отправки с кодом возврата и выводом curl
      * @throws GenerationException если файла нет, адрес пуст или curl не удалось запустить
      */
     public SendResult send(File xmlFile, String address) throws GenerationException {
+        return send(xmlFile, address, Constants.UTM_ACT_WRITE_OFF_PATH);
+    }
+
+    /**
+     * Отправляет документ ЕГАИС в УТМ по указанному пути приёма.
+     *
+     * @param xmlFile      файл документа, сформированный программой
+     * @param address      адрес УТМ из поля «Адрес УТМ», например {@code http://localhost:8080};
+     *                     путь приёма дописывается автоматически, если его ещё нет в адресе
+     * @param documentPath путь приёма в УТМ, например {@code /opt/in/TransferToShop}
+     * @return итог отправки с кодом возврата и выводом curl
+     * @throws GenerationException если файла нет, адрес пуст или curl не удалось запустить
+     */
+    public SendResult send(File xmlFile, String address, String documentPath) throws GenerationException {
         if (xmlFile == null || !xmlFile.isFile()) {
-            throw new GenerationException("Файл акта не найден: "
+            throw new GenerationException("Файл для отправки не найден: "
                     + (xmlFile == null ? "путь не задан" : xmlFile.getAbsolutePath()));
         }
-        final String url = endpoint(address);
+        final String url = endpoint(address, documentPath);
 
         Path tempDir = null;
         try {
@@ -149,16 +165,29 @@ public class UtmSender {
     }
 
     /**
-     * Собирает полный адрес приёма акта из адреса УТМ.
-     * <p>
-     * Если схема не указана, подставляется {@code http://}; если адрес уже содержит
-     * путь {@code /opt/in/ActWriteOff_v3}, он не дублируется.
+     * Собирает полный адрес приёма акта списания из адреса УТМ.
      *
      * @param address адрес УТМ из поля «Адрес УТМ»
      * @return полный адрес для curl
      * @throws GenerationException если адрес пуст
      */
     public static String endpoint(String address) throws GenerationException {
+        return endpoint(address, Constants.UTM_ACT_WRITE_OFF_PATH);
+    }
+
+    /**
+     * Собирает полный адрес приёма документа из адреса УТМ.
+     * <p>
+     * Если схема не указана, подставляется {@code http://}. Если в адресе уже
+     * указан путь приёма, он заменяется на нужный: так адрес, скопированный для
+     * одного документа, не превращается в {@code .../ActWriteOff_v3/opt/in/TransferToShop}.
+     *
+     * @param address      адрес УТМ из поля «Адрес УТМ»
+     * @param documentPath путь приёма в УТМ, например {@code /opt/in/TransferToShop}
+     * @return полный адрес для curl
+     * @throws GenerationException если адрес пуст
+     */
+    public static String endpoint(String address, String documentPath) throws GenerationException {
         if (address == null || address.trim().isEmpty()) {
             throw new GenerationException("Укажите адрес УТМ.");
         }
@@ -172,10 +201,38 @@ public class UtmSender {
         if (!value.contains("://")) {
             value = "http://" + value;
         }
-        if (value.endsWith(Constants.UTM_ACT_WRITE_OFF_PATH)) {
+        String path = documentPath == null ? "" : documentPath.trim();
+        if (path.isEmpty() || value.endsWith(path)) {
             return value;
         }
-        return value + Constants.UTM_ACT_WRITE_OFF_PATH;
+        // Адрес мог быть скопирован вместе с путём приёма другого документа —
+        // например, с «/opt/in/ActWriteOff_v3» или с оборванным «/opt/in».
+        // Такой хвост отбрасывается, иначе путь продублировался бы.
+        int marker = indexOfUploadRoot(value);
+        if (marker >= 0) {
+            value = value.substring(0, marker);
+        }
+        return value + path;
+    }
+
+    /**
+     * Ищет в адресе начало пути приёма УТМ ({@code /opt/in}).
+     *
+     * @param value адрес УТМ без завершающих косых черт
+     * @return позиция первого вхождения {@code /opt/in} как отдельного сегмента
+     *         или {@code -1}, если его нет
+     */
+    private static int indexOfUploadRoot(String value) {
+        String root = "/opt/in";
+        int marker = value.indexOf(root);
+        while (marker >= 0) {
+            int after = marker + root.length();
+            if (after == value.length() || value.charAt(after) == '/') {
+                return marker;
+            }
+            marker = value.indexOf(root, marker + 1);
+        }
+        return -1;
     }
 
     /** Ищет curl: сначала штатный в System32, затем в PATH. */

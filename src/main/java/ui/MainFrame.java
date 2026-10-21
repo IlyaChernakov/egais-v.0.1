@@ -23,8 +23,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.prefs.Preferences;
 
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -34,6 +36,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JTextArea;
@@ -49,6 +52,9 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import core.ActHeader;
 import core.GenerationException;
 import core.GenerationResult;
+import core.TransferHeader;
+import core.TransferResult;
+import core.TransferService;
 import core.UtmSender;
 import core.WriteOffService;
 import helpers.Constants;
@@ -69,8 +75,19 @@ public class MainFrame extends JFrame {
     private static final String PREF_ACT_NUMBER = "actNumber";
     private static final String PREF_TYPE_WRITE_OFF = "typeWriteOff";
     private static final String PREF_UTM_ADDRESS = "utmAddress";
+    private static final String PREF_LAST_SHOP_FILE = "lastShopRestsFile";
+    private static final String PREF_LAST_STOCK_FILE = "lastStockRestsFile";
+    private static final String PREF_TRANSFER_NUMBER = "transferNumber";
+    private static final String PREF_TRANSFER_IDENTITY = "transferIdentity";
+    private static final String PREF_TRANSFER_MODE = "transferMode";
 
     private final Preferences preferences = Preferences.userNodeForPackage(MainFrame.class);
+
+    /** Идёт длительная операция: поля и кнопки заблокированы. */
+    private boolean busy;
+
+    private final JRadioButton writeOffModeRadio = new JRadioButton("Акты списания", true);
+    private final JRadioButton transferModeRadio = new JRadioButton("Перенос остатков в магазин");
 
     private final JTextField inputField = new JTextField();
     private final JTextField outputField = new JTextField();
@@ -86,12 +103,41 @@ public class MainFrame extends JFrame {
     private final JLabel statusLabel = new JLabel("Готово к работе");
     private final JProgressBar progressBar = new JProgressBar();
 
+    // Поля режима переноса остатков в магазин.
+    private final JTextField transferShopField = new JTextField();
+    private final JTextField transferStockField = new JTextField();
+    private final JTextField transferFsrarIdField = new JTextField();
+    private final JTextField transferIdentityField = new JTextField();
+    private final JTextField transferNumberField = new JTextField();
+    private final JTextField transferDateField = new JTextField();
+    private final JLabel transferShopLabel = new JLabel("Остатки магазина:");
+    private final JLabel transferStockLabel = new JLabel("Остатки склада:");
+    private final JLabel transferFsrarIdLabel = new JLabel("FSRAR_ID организации:");
+    private final JLabel transferIdentityLabel = new JLabel("Identity документа:");
+    private final JLabel transferNumberLabel = new JLabel("Номер переноса:");
+    private final JLabel transferDateLabel = new JLabel("Дата переноса:");
+
     private final JButton browseInputButton = new JButton("Обзор…");
     private final JButton browseOutputButton = new JButton("Обзор…");
+    private final JButton browseTransferShopButton = new JButton("Обзор…");
+    private final JButton browseTransferStockButton = new JButton("Обзор…");
+
+    /** Компоненты, которые работают только в режиме актов списания. */
+    private final List<JComponent> writeOffComponents = new ArrayList<>();
+    /** Компоненты, которые работают только в режиме переноса остатков. */
+    private final List<JComponent> transferComponents = new ArrayList<>();
+
+    // Блоки полей, которые целиком относятся к одному из режимов: неактивный
+    // режим не только блокируется, но и скрывается, чтобы окно не разрасталось.
+    private JPanel actHeaderPanel;
+    private JPanel optionsPanel;
+    private JPanel transferFilesPanel;
+    private JPanel transferHeaderPanel;
     private final JButton generateButton = new JButton("Сформировать акты");
     private final JButton sendToUtmButton = new JButton("Отправить в УТМ");
     private final JButton openFolderButton = new JButton("Открыть папку");
     private final JMenuItem chooseInputItem = new JMenuItem("Выбрать файл остатков…");
+    private final JMenuItem chooseShopInputItem = new JMenuItem("Выбрать остатки магазина…");
     private final JMenuItem chooseOutputItem = new JMenuItem("Выбрать папку результата…");
 
     /** Файлы, сформированные последним запуском: их и предлагается отправить в УТМ. */
@@ -103,6 +149,7 @@ public class MainFrame extends JFrame {
         setMinimumSize(new Dimension(760, 700));
         buildUi();
         initActHeaderDefaults();
+        initTransferDefaults();
         wireActions();
         installDropTarget();
         restorePreferences();
@@ -122,6 +169,15 @@ public class MainFrame extends JFrame {
         noteField.setText(ActHeader.defaultNote(today));
     }
 
+    /**
+     * Заполняет поля документа переноса значениями по умолчанию: датой переноса
+     * становится сегодняшний день. Номер и Identity запоминаются между запусками,
+     * поэтому здесь они не задаются.
+     */
+    private void initTransferDefaults() {
+        transferDateField.setText(LocalDate.now().format(TransferHeader.USER_DATE));
+    }
+
     // ------------------------------------------------------------------
     // Построение интерфейса
     // ------------------------------------------------------------------
@@ -139,6 +195,7 @@ public class MainFrame extends JFrame {
 
         JMenu fileMenu = new JMenu("Файл");
         fileMenu.add(chooseInputItem);
+        fileMenu.add(chooseShopInputItem);
         fileMenu.add(chooseOutputItem);
         fileMenu.add(new JSeparator());
         JMenuItem exitItem = new JMenuItem("Выход");
@@ -175,47 +232,83 @@ public class MainFrame extends JFrame {
         buttonConstraints.gridx = 2;
         buttonConstraints.insets = new Insets(4, 0, 4, 0);
 
+        // Режим работы: или акты списания, или перенос остатков в магазин.
+        JPanel modePanel = buildModePanel();
+
+        GridBagConstraints modeConstraints = new GridBagConstraints();
+        modeConstraints.gridx = 0;
+        modeConstraints.gridy = 0;
+        modeConstraints.gridwidth = 3;
+        modeConstraints.fill = GridBagConstraints.HORIZONTAL;
+        modeConstraints.insets = new Insets(0, 0, 0, 0);
+        form.add(modePanel, modeConstraints);
+
         // Файл остатков
-        addRow(form, new JLabel("Файл остатков ЕГАИС:"), inputField, browseInputButton, 0,
-                labelConstraints, fieldConstraints, buttonConstraints);
+        addRow(form, new JLabel("Файл остатков ЕГАИС:"), inputField, browseInputButton, 1,
+                labelConstraints, fieldConstraints, buttonConstraints, writeOffComponents);
         inputField.setToolTipText("Выгрузка остатков из ЕГАИС, файл вида ReplyRests_v2.xml");
 
-        // Папка результата
-        addRow(form, new JLabel("Папка для результата:"), outputField, browseOutputButton, 1,
+        // Папка результата — общая для обоих режимов, поэтому не блокируется.
+        addRow(form, new JLabel("Папка для результата:"), outputField, browseOutputButton, 2,
                 labelConstraints, fieldConstraints, buttonConstraints);
-        outputField.setToolTipText("Каталог, в который будут сохранены акты списания");
+        outputField.setToolTipText("Каталог, в который будут сохранены акты списания"
+                + " или документ переноса остатков");
 
         // Данные акта
-        JPanel actHeaderPanel = buildActHeaderPanel();
+        actHeaderPanel = buildActHeaderPanel();
 
         GridBagConstraints actHeaderConstraints = new GridBagConstraints();
         actHeaderConstraints.gridx = 0;
-        actHeaderConstraints.gridy = 2;
+        actHeaderConstraints.gridy = 3;
         actHeaderConstraints.gridwidth = 3;
         actHeaderConstraints.fill = GridBagConstraints.HORIZONTAL;
         actHeaderConstraints.insets = new Insets(10, 0, 0, 0);
         form.add(actHeaderPanel, actHeaderConstraints);
 
         // Что формировать
-        JPanel options = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
-        options.setBorder(BorderFactory.createTitledBorder("Что формировать"));
-        options.add(strongCheckBox);
-        options.add(beerCheckBox);
+        optionsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        optionsPanel.setBorder(BorderFactory.createTitledBorder("Что формировать"));
+        optionsPanel.add(strongCheckBox);
+        optionsPanel.add(beerCheckBox);
 
         GridBagConstraints optionsConstraints = new GridBagConstraints();
         optionsConstraints.gridx = 0;
-        optionsConstraints.gridy = 3;
+        optionsConstraints.gridy = 4;
         optionsConstraints.gridwidth = 3;
         optionsConstraints.fill = GridBagConstraints.HORIZONTAL;
         optionsConstraints.insets = new Insets(10, 0, 0, 0);
-        form.add(options, optionsConstraints);
+        form.add(optionsPanel, optionsConstraints);
+        writeOffComponents.add(strongCheckBox);
+        writeOffComponents.add(beerCheckBox);
+
+        // Файлы для переноса остатков: остатки магазина и остатки склада
+        transferFilesPanel = buildTransferFilesPanel();
+
+        GridBagConstraints transferFilesConstraints = new GridBagConstraints();
+        transferFilesConstraints.gridx = 0;
+        transferFilesConstraints.gridy = 5;
+        transferFilesConstraints.gridwidth = 3;
+        transferFilesConstraints.fill = GridBagConstraints.HORIZONTAL;
+        transferFilesConstraints.insets = new Insets(10, 0, 0, 0);
+        form.add(transferFilesPanel, transferFilesConstraints);
+
+        // Данные документа переноса остатков в магазин
+        transferHeaderPanel = buildTransferHeaderPanel();
+
+        GridBagConstraints transferHeaderConstraints = new GridBagConstraints();
+        transferHeaderConstraints.gridx = 0;
+        transferHeaderConstraints.gridy = 6;
+        transferHeaderConstraints.gridwidth = 3;
+        transferHeaderConstraints.fill = GridBagConstraints.HORIZONTAL;
+        transferHeaderConstraints.insets = new Insets(10, 0, 0, 0);
+        form.add(transferHeaderPanel, transferHeaderConstraints);
 
         // Отправка в УТМ
         JPanel utmPanel = buildUtmPanel();
 
         GridBagConstraints utmConstraints = new GridBagConstraints();
         utmConstraints.gridx = 0;
-        utmConstraints.gridy = 4;
+        utmConstraints.gridy = 7;
         utmConstraints.gridwidth = 3;
         utmConstraints.fill = GridBagConstraints.HORIZONTAL;
         utmConstraints.insets = new Insets(10, 0, 0, 0);
@@ -229,13 +322,111 @@ public class MainFrame extends JFrame {
 
         GridBagConstraints buttonsConstraints = new GridBagConstraints();
         buttonsConstraints.gridx = 0;
-        buttonsConstraints.gridy = 5;
+        buttonsConstraints.gridy = 8;
         buttonsConstraints.gridwidth = 3;
         buttonsConstraints.anchor = GridBagConstraints.WEST;
         buttonsConstraints.insets = new Insets(10, 0, 0, 0);
         form.add(buttons, buttonsConstraints);
 
         return form;
+    }
+
+    /**
+     * Панель выбора режима работы. Режимы несовместимы: либо формируются акты
+     * списания, либо документ переноса остатков в магазин, поэтому поля одного
+     * режима блокируются при выборе другого.
+     */
+    private JPanel buildModePanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        panel.setBorder(BorderFactory.createTitledBorder("Режим работы"));
+
+        ButtonGroup group = new ButtonGroup();
+        group.add(writeOffModeRadio);
+        group.add(transferModeRadio);
+
+        writeOffModeRadio.setToolTipText("Формирование актов списания по выгрузке остатков ЕГАИС");
+        transferModeRadio.setToolTipText("Формирование документа переноса остатков в магазин"
+                + " по остаткам магазина и остаткам склада");
+
+        panel.add(writeOffModeRadio);
+        panel.add(transferModeRadio);
+        return panel;
+    }
+
+    /**
+     * Панель с файлами для режима переноса остатков в магазин: выгрузка остатков
+     * магазина и выгрузка остатков склада.
+     */
+    private JPanel buildTransferFilesPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Файлы для переноса остатков в магазин"));
+
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.anchor = GridBagConstraints.WEST;
+        labelConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints fieldConstraints = new GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
+        fieldConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints buttonConstraints = new GridBagConstraints();
+        buttonConstraints.gridx = 2;
+        buttonConstraints.insets = new Insets(3, 0, 3, 0);
+
+        addRow(panel, transferShopLabel, transferShopField, browseTransferShopButton, 0,
+                labelConstraints, fieldConstraints, buttonConstraints, transferComponents);
+        transferShopField.setToolTipText("Выгрузка остатков магазина, файл вида ReplyRestsShop_v2.xml");
+
+        addRow(panel, transferStockLabel, transferStockField, browseTransferStockButton, 1,
+                labelConstraints, fieldConstraints, buttonConstraints, transferComponents);
+        transferStockField.setToolTipText("Выгрузка остатков склада, файл вида ReplyRests_v2.xml");
+
+        return panel;
+    }
+
+    /**
+     * Панель с данными документа переноса остатков в магазин: FSRAR_ID организации,
+     * Identity и номер переноса, дата переноса.
+     */
+    private JPanel buildTransferHeaderPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Данные документа переноса"));
+
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.anchor = GridBagConstraints.WEST;
+        labelConstraints.insets = new Insets(3, 0, 3, 8);
+
+        GridBagConstraints fieldConstraints = new GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
+        fieldConstraints.insets = new Insets(3, 0, 3, 0);
+
+        addHeaderRow(panel, transferFsrarIdLabel, transferFsrarIdField, 0,
+                labelConstraints, fieldConstraints, transferComponents);
+        // Код всегда берётся из выбранного файла остатков магазина, поэтому поле только для чтения.
+        transferFsrarIdField.setEditable(false);
+        transferFsrarIdField.setToolTipText("Заполняется автоматически из файла остатков"
+                + " и не редактируется.");
+
+        addHeaderRow(panel, transferIdentityLabel, transferIdentityField, 1,
+                labelConstraints, fieldConstraints, transferComponents);
+        transferIdentityField.setToolTipText("Identity документа переноса; по умолчанию совпадает"
+                + " с номером переноса");
+
+        addHeaderRow(panel, transferNumberLabel, transferNumberField, 2,
+                labelConstraints, fieldConstraints, transferComponents);
+        transferNumberField.setToolTipText("Значение tts:TransferNumber в шапке документа");
+
+        addHeaderRow(panel, transferDateLabel, transferDateField, 3,
+                labelConstraints, fieldConstraints, transferComponents);
+        transferDateField.setToolTipText("Дата переноса; принимается и формат ГГГГ-ММ-ДД");
+
+        return panel;
     }
 
     /**
@@ -296,22 +487,27 @@ public class MainFrame extends JFrame {
         fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
         fieldConstraints.insets = new Insets(3, 0, 3, 0);
 
-        addHeaderRow(panel, "FSRAR_ID организации:", fsrarIdField, 0, labelConstraints, fieldConstraints);
+        addHeaderRow(panel, new JLabel("FSRAR_ID организации:"), fsrarIdField, 0,
+                labelConstraints, fieldConstraints, writeOffComponents);
         // Код всегда берётся из выбранного файла остатков, поэтому поле только для чтения:
         // так в акт не попадёт код, не совпадающий с самой выгрузкой.
         fsrarIdField.setEditable(false);
         fsrarIdField.setToolTipText("Заполняется автоматически из файла остатков ЕГАИС и не редактируется.");
 
-        addHeaderRow(panel, "Номер акта:", actNumberField, 1, labelConstraints, fieldConstraints);
+        addHeaderRow(panel, new JLabel("Номер акта:"), actNumberField, 1,
+                labelConstraints, fieldConstraints, writeOffComponents);
         actNumberField.setToolTipText("Номер акта; он же записывается в awr:Identity документа");
 
-        addHeaderRow(panel, "Дата списания (ДД-ММ-ГГГГ):", actDateField, 2, labelConstraints, fieldConstraints);
+        addHeaderRow(panel, new JLabel("Дата списания (ДД-ММ-ГГГГ):"), actDateField, 2,
+                labelConstraints, fieldConstraints, writeOffComponents);
         actDateField.setToolTipText("Дата акта; принимается и формат ГГГГ-ММ-ДД");
 
-        addHeaderRow(panel, "Причина списания:", typeWriteOffField, 3, labelConstraints, fieldConstraints);
+        addHeaderRow(panel, new JLabel("Причина списания:"), typeWriteOffField, 3,
+                labelConstraints, fieldConstraints, writeOffComponents);
         typeWriteOffField.setToolTipText("Значение awr:TypeWriteOff. Пустое поле — тег в акт не записывается.");
 
-        addHeaderRow(panel, "Примечание:", noteField, 4, labelConstraints, fieldConstraints);
+        addHeaderRow(panel, new JLabel("Примечание:"), noteField, 4,
+                labelConstraints, fieldConstraints, writeOffComponents);
         noteField.setToolTipText("Значение awr:Note. Пустое поле — тег в акт не записывается.");
 
         return panel;
@@ -319,21 +515,44 @@ public class MainFrame extends JFrame {
 
     private void addHeaderRow(JPanel panel, String labelText, JTextField field, int row,
                               GridBagConstraints labelConstraints, GridBagConstraints fieldConstraints) {
+        addHeaderRow(panel, new JLabel(labelText), field, row, labelConstraints, fieldConstraints, null);
+    }
+
+    private void addHeaderRow(JPanel panel, JLabel label, JTextField field, int row,
+                              GridBagConstraints labelConstraints, GridBagConstraints fieldConstraints,
+                              List<JComponent> registry) {
         labelConstraints.gridy = row;
         fieldConstraints.gridy = row;
-        panel.add(new JLabel(labelText), labelConstraints);
+        panel.add(label, labelConstraints);
         panel.add(field, fieldConstraints);
+        register(registry, label);
+        register(registry, field);
     }
 
     private void addRow(JPanel form, JLabel label, JTextField field, JButton button, int row,
                         GridBagConstraints labelConstraints, GridBagConstraints fieldConstraints,
                         GridBagConstraints buttonConstraints) {
+        addRow(form, label, field, button, row, labelConstraints, fieldConstraints, buttonConstraints, null);
+    }
+
+    private void addRow(JPanel form, JLabel label, JTextField field, JButton button, int row,
+                        GridBagConstraints labelConstraints, GridBagConstraints fieldConstraints,
+                        GridBagConstraints buttonConstraints, List<JComponent> registry) {
         labelConstraints.gridy = row;
         fieldConstraints.gridy = row;
         buttonConstraints.gridy = row;
         form.add(label, labelConstraints);
         form.add(field, fieldConstraints);
         form.add(button, buttonConstraints);
+        register(registry, label);
+        register(registry, field);
+        register(registry, button);
+    }
+
+    private static void register(List<JComponent> registry, JComponent component) {
+        if (registry != null) {
+            registry.add(component);
+        }
     }
 
     private JPanel buildLogPanel() {
@@ -374,13 +593,19 @@ public class MainFrame extends JFrame {
     private void wireActions() {
         browseInputButton.addActionListener(this::chooseInputFile);
         browseOutputButton.addActionListener(this::chooseOutputDirectory);
+        browseTransferShopButton.addActionListener(this::chooseTransferShopFile);
+        browseTransferStockButton.addActionListener(this::chooseTransferStockFile);
         chooseInputItem.addActionListener(this::chooseInputFile);
+        chooseShopInputItem.addActionListener(this::chooseTransferShopFile);
         chooseOutputItem.addActionListener(this::chooseOutputDirectory);
         generateButton.addActionListener(e -> generate());
         sendToUtmButton.addActionListener(e -> sendToUtm());
         openFolderButton.addActionListener(e -> openOutputFolder());
         strongCheckBox.addActionListener(e -> updateButtons());
         beerCheckBox.addActionListener(e -> updateButtons());
+        // Выбор режима блокирует поля другого режима — они несовместимы.
+        writeOffModeRadio.addActionListener(e -> updateMode());
+        transferModeRadio.addActionListener(e -> updateMode());
         // Адрес УТМ можно править вручную, поэтому кнопку отправки обновляем по мере ввода.
         utmAddressField.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -406,7 +631,39 @@ public class MainFrame extends JFrame {
                 updateFsrarIdFromInput(currentInputFile());
             }
         });
-        updateButtons();
+        // То же самое в режиме переноса: FSRAR_ID берётся из выбранных файлов.
+        FocusAdapter transferFocusListener = new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) {
+                updateTransferFsrarId();
+            }
+        };
+        transferShopField.addFocusListener(transferFocusListener);
+        transferStockField.addFocusListener(transferFocusListener);
+
+        DocumentListener refreshListener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updateButtons();
+            }
+        };
+        transferShopField.getDocument().addDocumentListener(refreshListener);
+        transferStockField.getDocument().addDocumentListener(refreshListener);
+        transferIdentityField.getDocument().addDocumentListener(refreshListener);
+        transferNumberField.getDocument().addDocumentListener(refreshListener);
+        transferDateField.getDocument().addDocumentListener(refreshListener);
+
+        updateMode();
     }
 
     private void chooseInputFile(ActionEvent event) {
@@ -449,7 +706,137 @@ public class MainFrame extends JFrame {
         updateButtons();
     }
 
+    /**
+     * Выбор файла остатков магазина: именно в нём ищутся коды с отрицательным
+     * остатком, которые нужно перенести на магазин.
+     */
+    private void chooseTransferShopFile(ActionEvent event) {
+        File selected = chooseTransferFile(currentTransferShopFile(),
+                "Выберите файл остатков магазина (ReplyRestsShop_v2.xml)");
+        if (selected == null) {
+            return;
+        }
+        transferShopField.setText(selected.getAbsolutePath());
+        writePreference(PREF_LAST_SHOP_FILE, selected);
+        if (outputField.getText().trim().isEmpty() && selected.getParentFile() != null) {
+            outputField.setText(selected.getParentFile().getAbsolutePath());
+        }
+        log("Выбран файл остатков магазина: " + selected.getAbsolutePath());
+        updateTransferFsrarId();
+        updateButtons();
+    }
+
+    /** Выбор файла остатков склада: в нём ищутся партии для переноса. */
+    private void chooseTransferStockFile(ActionEvent event) {
+        File selected = chooseTransferFile(currentTransferStockFile(),
+                "Выберите файл остатков склада (ReplyRests_v2.xml)");
+        if (selected == null) {
+            return;
+        }
+        transferStockField.setText(selected.getAbsolutePath());
+        writePreference(PREF_LAST_STOCK_FILE, selected);
+        if (outputField.getText().trim().isEmpty() && selected.getParentFile() != null) {
+            outputField.setText(selected.getParentFile().getAbsolutePath());
+        }
+        log("Выбран файл остатков склада: " + selected.getAbsolutePath());
+        updateTransferFsrarId();
+        updateButtons();
+    }
+
+    private File chooseTransferFile(File preferred, String title) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(title);
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setAcceptAllFileFilterUsed(true);
+        chooser.setFileFilter(new FileNameExtensionFilter("Выгрузка остатков ЕГАИС (*.xml)", "xml"));
+        setCurrentDirectory(chooser, preferred, readPreference(PREF_LAST_INPUT_DIR));
+
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        return chooser.getSelectedFile();
+    }
+
+    /**
+     * Обновляет интерфейс при смене режима работы: активирует поля выбранного
+     * режима и деактивирует поля другого, потому что режимы несовместимы.
+     */
+    private void updateMode() {
+        boolean transfer = transferModeRadio.isSelected();
+        // Режим запоминается: при следующем запуске окно откроется в нём же.
+        writePreference(PREF_TRANSFER_MODE, transfer ? "true" : "false");
+
+        // Поля неактивного режима не только блокируются, но и скрываются: иначе окно
+        // разрастается почти вдвое и журналу работы не остаётся места.
+        setComponentsVisible(writeOffComponents, !transfer);
+        setComponentsVisible(transferComponents, transfer);
+        setPanelVisible(actHeaderPanel, !transfer);
+        setPanelVisible(optionsPanel, !transfer);
+        setPanelVisible(transferFilesPanel, transfer);
+        setPanelVisible(transferHeaderPanel, transfer);
+
+        generateButton.setText(transfer ? "Сформировать перенос" : "Сформировать акты");
+        sendToUtmButton.setToolTipText(transfer
+                ? "Отправить документ переноса остатков в магазин в УТМ"
+                : "Отправить сформированные акты в УТМ");
+        updateButtons();
+        getContentPane().revalidate();
+        getContentPane().repaint();
+    }
+
+    private static void setComponentsVisible(List<JComponent> components, boolean visible) {
+        for (JComponent component : components) {
+            component.setVisible(visible);
+        }
+    }
+
+    private static void setPanelVisible(JPanel panel, boolean visible) {
+        if (panel != null) {
+            panel.setVisible(visible);
+        }
+    }
+
+    private void updateEnabledState(boolean isBusy) {
+        boolean transfer = transferModeRadio.isSelected();
+        setComponentsEnabled(writeOffComponents, !isBusy && !transfer);
+        setComponentsEnabled(transferComponents, !isBusy && transfer);
+
+        generateButton.setEnabled(!isBusy && canGenerate());
+        sendToUtmButton.setEnabled(!isBusy && canSend());
+        openFolderButton.setEnabled(!isBusy && currentOutputDirectory() != null
+                && currentOutputDirectory().isDirectory());
+        setComponentsEnabled(java.util.Collections.singletonList(outputField), !isBusy);
+        setComponentsEnabled(java.util.Collections.singletonList(browseOutputButton), !isBusy);
+        chooseOutputItem.setEnabled(!isBusy);
+        chooseInputItem.setEnabled(!isBusy && !transfer);
+        chooseShopInputItem.setEnabled(!isBusy && transfer);
+        utmAddressField.setEnabled(!isBusy);
+        writeOffModeRadio.setEnabled(!isBusy);
+        transferModeRadio.setEnabled(!isBusy);
+
+        progressBar.setVisible(isBusy);
+        progressBar.setIndeterminate(isBusy);
+        setCursor(Cursor.getPredefinedCursor(isBusy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
+        if (isBusy) {
+            setStatus(transfer ? "Идёт формирование документа переноса…" : "Идёт формирование актов…");
+        }
+    }
+
+    private static void setComponentsEnabled(List<JComponent> components, boolean enabled) {
+        for (JComponent component : components) {
+            component.setEnabled(enabled);
+        }
+    }
+
     private void generate() {
+        if (transferModeRadio.isSelected()) {
+            generateTransfer();
+        } else {
+            generateWriteOff();
+        }
+    }
+
+    private void generateWriteOff() {
         File inputFile = currentInputFile();
         File outputDirectory = currentOutputDirectory();
         boolean strong = strongCheckBox.isSelected();
@@ -544,6 +931,125 @@ public class MainFrame extends JFrame {
         }.execute();
     }
 
+    /**
+     * Формирует документ переноса остатков в магазин по двум выгрузкам:
+     * остаткам магазина (отрицательные остатки) и остаткам склада (партии для переноса).
+     */
+    private void generateTransfer() {
+        File shopFile = currentTransferShopFile();
+        File stockFile = currentTransferStockFile();
+        File outputDirectory = currentOutputDirectory();
+
+        if (shopFile == null) {
+            showWarning("Выберите файл остатков магазина (ReplyRestsShop_v2.xml).");
+            return;
+        }
+        if (!shopFile.isFile()) {
+            showWarning("Файл остатков магазина не найден:\n" + shopFile.getAbsolutePath());
+            return;
+        }
+        if (stockFile == null) {
+            showWarning("Выберите файл остатков склада (ReplyRests_v2.xml).");
+            return;
+        }
+        if (!stockFile.isFile()) {
+            showWarning("Файл остатков склада не найден:\n" + stockFile.getAbsolutePath());
+            return;
+        }
+        if (outputDirectory == null) {
+            showWarning("Выберите папку для сохранения результата.");
+            return;
+        }
+        // Поле FSRAR_ID недоступно для правки, поэтому объясняем, что именно не так с файлом.
+        if (transferFsrarIdField.getText().trim().isEmpty()) {
+            showWarning("В файле остатков магазина не найден FSRAR_ID организации,"
+                    + " поэтому документ переноса сформировать нельзя.\n\nФайл: " + shopFile.getAbsolutePath());
+            return;
+        }
+        // Если Identity не заполнен, он совпадает с номером переноса — как в образце.
+        if (transferIdentityField.getText().trim().isEmpty()) {
+            transferIdentityField.setText(transferNumberField.getText().trim());
+        }
+
+        TransferHeader header;
+        try {
+            header = TransferHeader.of(transferFsrarIdField.getText(), transferIdentityField.getText(),
+                    transferNumberField.getText(), transferDateField.getText());
+            header.validate();
+        } catch (GenerationException e) {
+            showWarning(e.getMessage());
+            return;
+        }
+
+        writePreference(PREF_LAST_SHOP_FILE, shopFile);
+        writePreference(PREF_LAST_STOCK_FILE, stockFile);
+        writePreference(PREF_LAST_INPUT_DIR, shopFile.getParentFile());
+        writePreference(PREF_LAST_OUTPUT_DIR, outputDirectory);
+        writePreference(PREF_TRANSFER_NUMBER, header.getTransferNumber());
+        writePreference(PREF_TRANSFER_IDENTITY, header.getIdentity());
+
+        setBusy(true);
+        log("――― Начало формирования документа переноса ―――");
+
+        new SwingWorker<TransferResult, String>() {
+            @Override
+            protected TransferResult doInBackground() throws Exception {
+                TransferService service = new TransferService().withLogger(this::publish);
+                return service.generate(shopFile, stockFile, outputDirectory, header);
+            }
+
+            @Override
+            protected void process(List<String> chunks) {
+                for (String message : chunks) {
+                    log(message);
+                }
+            }
+
+            @Override
+            protected void done() {
+                setBusy(false);
+                try {
+                    TransferResult result = get();
+                    // Документ переноса один, поэтому в отправку попадает именно он.
+                    lastGeneratedFiles.clear();
+                    lastGeneratedFiles.add(result.getWrittenFile());
+                    updateButtons();
+                    log(String.format("Готово. Позиций в документе переноса: %d"
+                                    + " (кодов с отрицательным остатком: %d, найдено на складе: %d).",
+                            result.getPositions(), result.getNegativeCodes(), result.getMatchedCodes()));
+                    setStatus("Готово: позиций в документе переноса — " + result.getPositions());
+                    JOptionPane.showMessageDialog(MainFrame.this,
+                            buildTransferSuccessMessage(result),
+                            "Формирование завершено",
+                            JOptionPane.INFORMATION_MESSAGE);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log("Операция прервана.");
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    String message = cause instanceof GenerationException && cause.getMessage() != null
+                            ? cause.getMessage()
+                            : String.valueOf(cause);
+                    log("ОШИБКА: " + message);
+                    setStatus("Ошибка");
+                    JOptionPane.showMessageDialog(MainFrame.this, message, "Ошибка", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private String buildTransferSuccessMessage(TransferResult result) {
+        StringBuilder builder = new StringBuilder("Документ переноса остатков в магазин сформирован.\n\n");
+        builder.append(result.getWrittenFile().getName())
+                .append("  —  ")
+                .append(result.getWrittenFile().getAbsolutePath())
+                .append('\n');
+        builder.append("\nПозиций в документе: ").append(result.getPositions());
+        builder.append("\nКодов с отрицательным остатком: ").append(result.getNegativeCodes());
+        builder.append("\nНайдено подходящих партий на складе: ").append(result.getMatchedCodes());
+        return builder.toString();
+    }
+
     private String buildSuccessMessage(GenerationResult result) {
         StringBuilder builder = new StringBuilder("Акты списания сформированы.\n\n");
         for (File file : result.getWrittenFiles()) {
@@ -563,21 +1069,32 @@ public class MainFrame extends JFrame {
     // ------------------------------------------------------------------
 
     /**
-     * Отправляет сформированные акты в УТМ утилитой curl.
+     * Отправляет сформированный документ в УТМ утилитой curl.
      * <p>
-     * Каждый файл передаётся отдельной командой вида
-     * {@code curl -F "xml_file=@client.xml" <адрес УТМ>/opt/in/ActWriteOff_v3}.
+     * Тип документа зависит от режима работы: акты списания передаются по адресу
+     * {@code <адрес УТМ>/opt/in/ActWriteOff_v3}, документ переноса остатков в магазин —
+     * по адресу {@code <адрес УТМ>/opt/in/TransferToShop}:
+     * <pre>
+     * curl -F "xml_file=@client.xml" http://localhost:8080/opt/in/TransferToShop
+     * </pre>
      */
     private void sendToUtm() {
+        final boolean transfer = transferModeRadio.isSelected();
         final List<File> files = filesToSend();
         if (files.isEmpty()) {
-            showWarning("Отправлять пока нечего: сначала сформируйте акты.");
+            showWarning(transfer
+                    ? "Отправлять пока нечего: сначала сформируйте документ переноса остатков."
+                    : "Отправлять пока нечего: сначала сформируйте акты.");
             return;
         }
 
+        final String address = utmAddressField.getText().trim();
+        final String documentPath = transfer
+                ? Constants.UTM_TRANSFER_TO_SHOP_PATH
+                : Constants.UTM_ACT_WRITE_OFF_PATH;
         final String url;
         try {
-            url = UtmSender.endpoint(utmAddressField.getText());
+            url = UtmSender.endpoint(address, documentPath);
         } catch (GenerationException e) {
             showWarning(e.getMessage());
             return;
@@ -587,10 +1104,10 @@ public class MainFrame extends JFrame {
             return;
         }
 
-        writePreference(PREF_UTM_ADDRESS, utmAddressField.getText().trim());
+        writePreference(PREF_UTM_ADDRESS, address);
 
         setBusy(true);
-        log("――― Отправка актов в УТМ ―――");
+        log(transfer ? "――― Отправка документа переноса в УТМ ―――" : "――― Отправка актов в УТМ ―――");
 
         new SwingWorker<List<UtmSender.SendResult>, String>() {
             @Override
@@ -601,7 +1118,7 @@ public class MainFrame extends JFrame {
                         + Constants.UTM_UPLOAD_FILE_NAME + "\" " + url);
                 for (File file : files) {
                     publish("Отправляю " + file.getName() + " …");
-                    UtmSender.SendResult result = sender.send(file, url);
+                    UtmSender.SendResult result = sender.send(file, address, documentPath);
                     results.add(result);
                     if (result.getOutput().isEmpty()) {
                         publish("  ответ УТМ: пусто, код возврата " + result.getExitCode() + ".");
@@ -683,7 +1200,8 @@ public class MainFrame extends JFrame {
 
     /**
      * Файлы для отправки: сформированные последним запуском, а если их нет —
-     * найденные в папке результата.
+     * найденные в папке результата. В режиме переноса это документ TransferToShop.xml,
+     * в режиме списания — акты по крепкому алкоголю и пиву.
      */
     private List<File> filesToSend() {
         List<File> files = new ArrayList<>();
@@ -699,7 +1217,10 @@ public class MainFrame extends JFrame {
         if (directory == null || !directory.isDirectory()) {
             return files;
         }
-        for (String name : new String[]{Constants.OUTPUT_FILE_STRONG, Constants.OUTPUT_FILE_BEER}) {
+        String[] names = transferModeRadio.isSelected()
+                ? new String[]{Constants.OUTPUT_FILE_TRANSFER}
+                : new String[]{Constants.OUTPUT_FILE_STRONG, Constants.OUTPUT_FILE_BEER};
+        for (String name : names) {
             File file = new File(directory, name);
             if (file.isFile()) {
                 files.add(file);
@@ -755,13 +1276,17 @@ public class MainFrame extends JFrame {
     private void showAbout() {
         JOptionPane.showMessageDialog(this,
                 Constants.APP_NAME + "\nВерсия " + Constants.APP_VERSION + "\n\n"
-                        + "Формирует акты списания по крепкому алкоголю и пиву\n"
-                        + "на основании выгрузки текущих остатков из ЕГАИС (ReplyRests_v2.xml).\n\n"
-                        + "Данные акта (FSRAR_ID, номер, дата, причина, примечание)\n"
-                        + "задаются в окне и попадают в шапку документа.\n\n"
-                        + "Результат: ActWriteOffStrong.xml и ActWriteOffBeer.xml\n"
-                        + "в выбранной папке.\n\n"
-                        + "Готовые акты можно отправить в УТМ утилитой curl\n"
+                        + "Программа работает в двух режимах, которые несовместимы:\n\n"
+                        + "1. Акты списания по крепкому алкоголю и пиву\n"
+                        + "   на основании выгрузки текущих остатков из ЕГАИС (ReplyRests_v2.xml).\n"
+                        + "   Результат: ActWriteOffStrong.xml и ActWriteOffBeer.xml.\n\n"
+                        + "2. Перенос остатков в магазин (TransferToShop)\n"
+                        + "   по выгрузке остатков магазина (ReplyRestsShop_v2.xml)\n"
+                        + "   и выгрузке остатков склада (ReplyRests_v2.xml).\n"
+                        + "   Результат: TransferToShop.xml.\n\n"
+                        + "FSRAR_ID организации берётся из выбранного файла остатков.\n"
+                        + "Остальные данные документа задаются в окне.\n\n"
+                        + "Готовый документ можно отправить в УТМ утилитой curl\n"
                         + "по адресу из поля «Адрес УТМ».",
                 "О программе",
                 JOptionPane.INFORMATION_MESSAGE);
@@ -798,6 +1323,20 @@ public class MainFrame extends JFrame {
                     if (file.isDirectory()) {
                         outputField.setText(file.getAbsolutePath());
                         log("Выбрана папка результата: " + file.getAbsolutePath());
+                    } else if (transferModeRadio.isSelected()) {
+                        // В режиме переноса нужны два файла: сначала заполняем остатки
+                        // магазина, затем — остатки склада.
+                        if (transferShopField.getText().trim().isEmpty()) {
+                            transferShopField.setText(file.getAbsolutePath());
+                            log("Выбран файл остатков магазина: " + file.getAbsolutePath());
+                        } else {
+                            transferStockField.setText(file.getAbsolutePath());
+                            log("Выбран файл остатков склада: " + file.getAbsolutePath());
+                        }
+                        if (outputField.getText().trim().isEmpty() && file.getParentFile() != null) {
+                            outputField.setText(file.getParentFile().getAbsolutePath());
+                        }
+                        updateTransferFsrarId();
                     } else {
                         inputField.setText(file.getAbsolutePath());
                         if (outputField.getText().trim().isEmpty() && file.getParentFile() != null) {
@@ -821,38 +1360,28 @@ public class MainFrame extends JFrame {
     // ------------------------------------------------------------------
 
     private void setBusy(boolean busy) {
-        generateButton.setEnabled(!busy && canGenerate());
-        sendToUtmButton.setEnabled(!busy && canSend());
-        browseInputButton.setEnabled(!busy);
-        browseOutputButton.setEnabled(!busy);
-        chooseInputItem.setEnabled(!busy);
-        chooseOutputItem.setEnabled(!busy);
-        strongCheckBox.setEnabled(!busy);
-        beerCheckBox.setEnabled(!busy);
-        fsrarIdField.setEnabled(!busy);
-        actNumberField.setEnabled(!busy);
-        actDateField.setEnabled(!busy);
-        typeWriteOffField.setEnabled(!busy);
-        noteField.setEnabled(!busy);
-        utmAddressField.setEnabled(!busy);
-        progressBar.setVisible(busy);
-        progressBar.setIndeterminate(busy);
-        setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
-        if (busy) {
-            setStatus("Идёт формирование актов…");
-        }
+        this.busy = busy;
+        updateButtons();
     }
 
     private void updateButtons() {
-        generateButton.setEnabled(canGenerate());
-        sendToUtmButton.setEnabled(canSend());
-        openFolderButton.setEnabled(currentOutputDirectory() != null
-                && currentOutputDirectory().isDirectory());
+        updateEnabledState(busy);
     }
 
+    /**
+     * Формирование возможно, когда заполнены поля того режима, который выбран.
+     * Акты требуют файла остатков, отметки вида продукции и папки результата;
+     * перенос — файла остатков магазина, файла остатков склада и папки результата.
+     */
     private boolean canGenerate() {
+        if (outputField.getText().trim().isEmpty()) {
+            return false;
+        }
+        if (transferModeRadio.isSelected()) {
+            return !transferShopField.getText().trim().isEmpty()
+                    && !transferStockField.getText().trim().isEmpty();
+        }
         return !inputField.getText().trim().isEmpty()
-                && !outputField.getText().trim().isEmpty()
                 && (strongCheckBox.isSelected() || beerCheckBox.isSelected());
     }
 
@@ -863,6 +1392,16 @@ public class MainFrame extends JFrame {
 
     private File currentInputFile() {
         String text = inputField.getText().trim();
+        return text.isEmpty() ? null : new File(text);
+    }
+
+    private File currentTransferShopFile() {
+        String text = transferShopField.getText().trim();
+        return text.isEmpty() ? null : new File(text);
+    }
+
+    private File currentTransferStockFile() {
+        String text = transferStockField.getText().trim();
         return text.isEmpty() ? null : new File(text);
     }
 
@@ -966,9 +1505,47 @@ public class MainFrame extends JFrame {
     }
 
     /**
+     * Обновляет FSRAR_ID организации в режиме переноса остатков.
+     * <p>
+     * Код берётся из файла остатков магазина, а если там его нет — из файла остатков
+     * склада. Поле только для чтения: значение всегда соответствует выбранным файлам.
+     */
+    private void updateTransferFsrarId() {
+        String owner = readOwnerQuietly(currentTransferShopFile());
+        if (owner.isEmpty()) {
+            owner = readOwnerQuietly(currentTransferStockFile());
+        }
+        if (owner.equals(transferFsrarIdField.getText())) {
+            // Значение не изменилось — не засоряем журнал повторными записями.
+            return;
+        }
+        transferFsrarIdField.setText(owner);
+        if (owner.isEmpty()) {
+            log("В выбранных файлах не найден FSRAR_ID организации.");
+        } else {
+            log("FSRAR_ID организации взят из файла остатков: " + owner);
+        }
+        updateButtons();
+    }
+
+    private String readOwnerQuietly(File file) {
+        if (file == null || !file.isFile()) {
+            return "";
+        }
+        try {
+            return XmlSupport.ownerFsrarId(file);
+        } catch (GenerationException e) {
+            log("Не удалось прочитать FSRAR_ID организации из файла "
+                    + file.getName() + ": " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
      * Восстанавливает пути, выбранные при прошлом запуске, если они ещё существуют,
-     * а также номер и причину списания. Дата и примечание не запоминаются — они
-     * привязаны к текущему дню, а FSRAR_ID всегда берётся из файла остатков.
+     * а также номер и причину списания, номер и Identity переноса и выбранный режим.
+     * Дата и примечание не запоминаются — они привязаны к текущему дню, а FSRAR_ID
+     * всегда берётся из файла остатков.
      */
     private void restorePreferences() {
         String lastInput = readPreference(PREF_LAST_INPUT_FILE);
@@ -976,6 +1553,20 @@ public class MainFrame extends JFrame {
             File file = new File(lastInput);
             if (file.isFile()) {
                 inputField.setText(file.getAbsolutePath());
+            }
+        }
+        String lastShop = readPreference(PREF_LAST_SHOP_FILE);
+        if (lastShop != null) {
+            File file = new File(lastShop);
+            if (file.isFile()) {
+                transferShopField.setText(file.getAbsolutePath());
+            }
+        }
+        String lastStock = readPreference(PREF_LAST_STOCK_FILE);
+        if (lastStock != null) {
+            File file = new File(lastStock);
+            if (file.isFile()) {
+                transferStockField.setText(file.getAbsolutePath());
             }
         }
         String lastOutput = readPreference(PREF_LAST_OUTPUT_DIR);
@@ -997,7 +1588,21 @@ public class MainFrame extends JFrame {
         if (savedUtmAddress != null && !savedUtmAddress.trim().isEmpty()) {
             utmAddressField.setText(savedUtmAddress);
         }
+        String savedTransferNumber = readPreference(PREF_TRANSFER_NUMBER);
+        if (savedTransferNumber != null && !savedTransferNumber.trim().isEmpty()) {
+            transferNumberField.setText(savedTransferNumber);
+        }
+        String savedTransferIdentity = readPreference(PREF_TRANSFER_IDENTITY);
+        if (savedTransferIdentity != null && !savedTransferIdentity.trim().isEmpty()) {
+            transferIdentityField.setText(savedTransferIdentity);
+        }
+        // Режим запоминается последним: он определяет, какие поля останутся активными.
+        boolean transferMode = "true".equals(readPreference(PREF_TRANSFER_MODE));
+        writeOffModeRadio.setSelected(!transferMode);
+        transferModeRadio.setSelected(transferMode);
+
         updateFsrarIdFromInput(currentInputFile());
-        updateButtons();
+        updateTransferFsrarId();
+        updateMode();
     }
 }

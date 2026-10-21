@@ -126,7 +126,7 @@ $jpackageArgs = @(
     '--type', 'app-image',
     '--name', 'EgaisWriteOff',
     '--app-version', $AppVersion,
-    '--description', 'Формирование актов списания ЕГАИС на основании текущих остатков',
+    '--description', 'Формирование актов списания и документа переноса остатков в магазин ЕГАИС',
     '--vendor', 'egais-v.0.1',
     '--input', $packageDir,
     '--main-jar', 'egais-writeoff.jar',
