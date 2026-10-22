@@ -1,43 +1,26 @@
 package core;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 import helpers.Constants;
 
 /**
- * Записывает документ переноса остатков в магазин ровно в том виде, в каком он
- * приведён в образце {@code src/main/java/files-/TransferToShop.xml}: те же теги,
- * порядок объявлений пространств имён, отступы, XML-декларация и перевод строки CRLF.
+ * Записывает документ переноса остатков в магазин {@code ns:TransferToShop}
+ * в стандартном оформлении XML (см. {@link XmlOutput}).
  * <p>
- * Обычный XML-сериализатор так не сделает: он расставляет отступы по-своему
- * и убирает повторные объявления пространств имён, поэтому документ собирается
- * как текст. Значения экранируются.
+ * Документ собирается как дерево элементов, поэтому экранирование значений,
+ * отступы, объявления пространств имён и вид пустых элементов обеспечивает
+ * стандартный сериализатор.
  */
 public final class TransferXmlWriter {
 
-    /** Перевод строки как в образце — файл рассчитан на Windows. */
-    private static final String EOL = "\r\n";
-
-    private static final String ATTR_XMLNS_NS = "xmlns:ns";
-    private static final String ATTR_XMLNS_XS = "xmlns:xs";
-    private static final String ATTR_XMLNS_C = "xmlns:c";
-    private static final String ATTR_XMLNS_PREF = "xmlns:pref";
-    private static final String ATTR_XMLNS_TTS = "xmlns:tts";
-
-    private static final String INDENT_ENVELOPE_1 = "    ";
-    private static final String INDENT_ENVELOPE_2 = "        ";
-    private static final String INDENT_ENVELOPE_3 = "            ";
-    private static final String INDENT_ENVELOPE_4 = "                ";
-
-    private static final String INDENT_POSITION = "    ";
-    private static final String INDENT_FIELD = "        ";
-    private static final String INDENT_F2_REG_ID = "            ";
-
     private final TransferHeader header;
-    private final StringBuilder positions = new StringBuilder();
+    private final List<Position> positions = new ArrayList<>();
 
     public TransferXmlWriter(TransferHeader header) {
         this.header = header;
@@ -52,14 +35,7 @@ public final class TransferXmlWriter {
      * @param f2RegId     регистрационный номер справки 2 ({@code pref:F2RegId})
      */
     public void position(int number, String productCode, String quantity, String f2RegId) {
-        openLine(positions, INDENT_POSITION, Constants.TTS_POSITION);
-        line(positions, INDENT_FIELD, Constants.TTS_IDENTITY, String.valueOf(number));
-        line(positions, INDENT_FIELD, Constants.TTS_PRODUCT_CODE, productCode);
-        line(positions, INDENT_FIELD, Constants.TTS_QUANTITY, quantity);
-        openLine(positions, INDENT_FIELD, Constants.TTS_INFORM_F2);
-        line(positions, INDENT_F2_REG_ID, Constants.TAG_F2_REG_ID, f2RegId);
-        closeLine(positions, INDENT_FIELD, Constants.TTS_INFORM_F2);
-        closeLine(positions, INDENT_POSITION, Constants.TTS_POSITION);
+        positions.add(new Position(number, productCode, quantity, f2RegId));
     }
 
     /**
@@ -67,108 +43,81 @@ public final class TransferXmlWriter {
      * Родительские каталоги создаются автоматически.
      *
      * @param outputFile файл результата
-     * @throws GenerationException если каталог или файл не удалось создать
+     * @throws GenerationException если документ или файл не удалось записать
      */
     public void writeTo(File outputFile) throws GenerationException {
-        if (outputFile == null) {
-            throw new GenerationException("Не задан файл для сохранения результата.");
-        }
-
-        StringBuilder xml = new StringBuilder(4096);
-        xml.append(Constants.XML_DECLARATION_UTF8).append(EOL);
-        xml.append('<').append(Constants.TAG_DOCUMENTS)
-                .append(' ').append(Constants.ATTR_VERSION).append("=\"").append(Constants.DOCUMENTS_VERSION).append('"')
-                .append(EOL);
-        xml.append(INDENT_ENVELOPE_1).append(ATTR_XMLNS_NS).append("=\"").append(Constants.NAMESPACE_DOCUMENTS)
-                .append('"').append(EOL);
-        xml.append(INDENT_ENVELOPE_1).append(ATTR_XMLNS_XS).append("=\"").append(Constants.NAMESPACE_XS)
-                .append('"').append(EOL);
-        xml.append(INDENT_ENVELOPE_1).append(ATTR_XMLNS_C).append("=\"").append(Constants.NAMESPACE_COMMON)
-                .append('"').append(EOL);
-        xml.append(INDENT_ENVELOPE_1).append(ATTR_XMLNS_PREF).append("=\"").append(Constants.NAMESPACE_PREF)
-                .append('"').append(EOL);
-        xml.append(INDENT_ENVELOPE_1).append(ATTR_XMLNS_TTS).append("=\"").append(Constants.NAMESPACE_TTS)
-                .append("\">").append(EOL);
-
-        openLine(xml, INDENT_ENVELOPE_1, Constants.TAG_OWNER);
-        line(xml, INDENT_ENVELOPE_2, Constants.TAG_FSRAR_ID, header.getFsrarId());
-        closeLine(xml, INDENT_ENVELOPE_1, Constants.TAG_OWNER);
-
-        openLine(xml, INDENT_ENVELOPE_1, Constants.TAG_DOCUMENT);
-        openLine(xml, INDENT_ENVELOPE_2, Constants.TAG_TRANSFER_TO_SHOP);
-        line(xml, INDENT_ENVELOPE_3, Constants.TTS_IDENTITY, header.getIdentity());
-
-        openLine(xml, INDENT_ENVELOPE_3, Constants.TTS_HEADER);
-        line(xml, INDENT_ENVELOPE_4, Constants.TTS_TRANSFER_NUMBER, header.getTransferNumber());
-        line(xml, INDENT_ENVELOPE_4, Constants.TTS_TRANSFER_DATE, header.getTransferDateText());
-        closeLine(xml, INDENT_ENVELOPE_3, Constants.TTS_HEADER);
-
-        if (positions.length() == 0) {
-            emptyLine(xml, "", Constants.TTS_CONTENT);
-        } else {
-            openLine(xml, "", Constants.TTS_CONTENT);
-            xml.append(positions);
-            closeLine(xml, "", Constants.TTS_CONTENT);
-        }
-
-        closeLine(xml, INDENT_ENVELOPE_2, Constants.TAG_TRANSFER_TO_SHOP);
-        closeLine(xml, INDENT_ENVELOPE_1, Constants.TAG_DOCUMENT);
-        // Завершающий тег — последняя строка файла, перевод строки после него не нужен.
-        xml.append("</").append(Constants.TAG_DOCUMENTS).append('>');
-
-        File parent = outputFile.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-            throw new GenerationException("Не удалось создать папку: " + parent.getAbsolutePath());
-        }
-        try {
-            Files.write(outputFile.toPath(), xml.toString().getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new GenerationException("Не удалось записать файл " + outputFile.getAbsolutePath()
-                    + ": " + e.getMessage(), e);
-        }
+        XmlOutput.write(buildDocument(), outputFile);
     }
 
-    private static void openLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append('<').append(tag).append('>').append(EOL);
-    }
+    private Document buildDocument() throws GenerationException {
+        Document document = XmlOutput.newDocument();
 
-    private static void closeLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append("</").append(tag).append('>').append(EOL);
-    }
+        Element root = XmlOutput.element(document, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_DOCUMENTS);
+        document.appendChild(root);
+        root.setAttribute(Constants.ATTR_VERSION, Constants.DOCUMENTS_VERSION);
+        XmlOutput.declareNamespace(root, "xmlns:ns", Constants.NAMESPACE_DOCUMENTS);
+        XmlOutput.declareNamespace(root, "xmlns:xs", Constants.NAMESPACE_XS);
+        XmlOutput.declareNamespace(root, "xmlns:c", Constants.NAMESPACE_COMMON);
+        XmlOutput.declareNamespace(root, "xmlns:pref", Constants.NAMESPACE_PREF);
+        XmlOutput.declareNamespace(root, "xmlns:tts", Constants.NAMESPACE_TTS);
 
-    private static void emptyLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append('<').append(tag).append("/>").append(EOL);
-    }
+        Element owner = append(root, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_OWNER);
+        owner.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_DOCUMENTS,
+                Constants.TAG_FSRAR_ID, header.getFsrarId()));
 
-    private static void line(StringBuilder out, String indent, String tag, String value) {
-        out.append(indent).append('<').append(tag).append('>')
-                .append(escape(value))
-                .append("</").append(tag).append('>')
-                .append(EOL);
-    }
+        Element envelope = append(root, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_DOCUMENT);
+        // Как и в других документах ЕГАИС, корневой элемент переноса записан
+        // с префиксом конверта, а его содержимое — в собственном пространстве имён.
+        Element transfer = append(envelope, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_TRANSFER_TO_SHOP);
+        transfer.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_IDENTITY, header.getIdentity()));
 
-    /** Экранирует служебные символы XML. */
-    private static String escape(String value) {
-        if (value == null) {
-            return "";
+        Element transferHeader = append(transfer, Constants.NAMESPACE_TTS, Constants.TTS_HEADER);
+        transferHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_TRANSFER_NUMBER, header.getTransferNumber()));
+        transferHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_TRANSFER_DATE, header.getTransferDateText()));
+
+        Element content = append(transfer, Constants.NAMESPACE_TTS, Constants.TTS_CONTENT);
+        for (Position position : positions) {
+            appendPosition(document, content, position);
         }
-        StringBuilder result = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '&':
-                    result.append("&amp;");
-                    break;
-                case '<':
-                    result.append("&lt;");
-                    break;
-                case '>':
-                    result.append("&gt;");
-                    break;
-                default:
-                    result.append(c);
-            }
+        return document;
+    }
+
+    private void appendPosition(Document document, Element content, Position position) {
+        Element element = append(content, Constants.NAMESPACE_TTS, Constants.TTS_POSITION);
+        element.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_IDENTITY, String.valueOf(position.number)));
+        element.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_PRODUCT_CODE, position.productCode));
+        element.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
+                Constants.TTS_QUANTITY, position.quantity));
+
+        Element informF2 = append(element, Constants.NAMESPACE_TTS, Constants.TTS_INFORM_F2);
+        informF2.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_PREF,
+                Constants.TAG_F2_REG_ID, position.f2RegId));
+    }
+
+    private static Element append(Element parent, String namespace, String name) {
+        Element element = XmlOutput.element(parent.getOwnerDocument(), namespace, name);
+        parent.appendChild(element);
+        return element;
+    }
+
+    /** Позиция документа переноса в том виде, в каком её передал вызывающий код. */
+    private static final class Position {
+
+        private final int number;
+        private final String productCode;
+        private final String quantity;
+        private final String f2RegId;
+
+        private Position(int number, String productCode, String quantity, String f2RegId) {
+            this.number = number;
+            this.productCode = productCode;
+            this.quantity = quantity;
+            this.f2RegId = f2RegId;
         }
-        return result.toString();
     }
 }

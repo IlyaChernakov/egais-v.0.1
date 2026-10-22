@@ -1,45 +1,27 @@
 package core;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 import helpers.Constants;
 
 /**
- * Записывает акт списания ровно в том виде, в каком он приведён в образце
- * {@code src/main/java/files/1.xml}: те же теги, порядок атрибутов, отступы,
- * отсутствие XML-декларации и перевод строки CRLF.
+ * Записывает акт списания {@code ns:ActWriteOff_v3} в стандартном оформлении XML
+ * (см. {@link XmlOutput}).
  * <p>
- * Обычный XML-сериализатор так не сделает: он добавляет декларацию, убирает
- * повторные объявления пространства имён и расставляет отступы по-своему,
- * поэтому документ собирается как текст. Значения экранируются.
+ * Документ собирается как дерево элементов, поэтому экранирование значений,
+ * отступы, объявления пространств имён и вид пустых элементов обеспечивает
+ * стандартный сериализатор.
  */
 public final class ActXmlWriter {
 
-    /** Перевод строки как в образце — файл рассчитан на Windows. */
-    private static final String EOL = "\r\n";
-
-    private static final String ATTR_XMLNS_XSI = "xmlns:xsi";
-    private static final String ATTR_XMLNS_NS = "xmlns:ns";
-    private static final String ATTR_XMLNS_PREF = "xmlns:pref";
-    private static final String ATTR_XMLNS_AWR = "xmlns:awr";
-    private static final String ATTR_XMLNS_CE = "xmlns:ce";
-
-    private static final String INDENT_ENVELOPE_1 = "  ";
-    private static final String INDENT_ENVELOPE_2 = "    ";
-    private static final String INDENT_ENVELOPE_3 = "      ";
-    private static final String INDENT_ENVELOPE_4 = "        ";
-    private static final String INDENT_POSITION = "    ";
-    private static final String INDENT_FIELD = "        ";
-    private static final String INDENT_INFORM_F2 = "            ";
-    private static final String INDENT_F2_REG_ID = "                ";
-    private static final String INDENT_AMC = "            ";
-
     private final ActHeader header;
-    private final StringBuilder positions = new StringBuilder();
+    private final List<Position> positions = new ArrayList<>();
 
     public ActXmlWriter(ActHeader header) {
         this.header = header;
@@ -55,29 +37,8 @@ public final class ActXmlWriter {
      *                 не записывается (так формируется акт по пиву)
      */
     public void position(int number, String quantity, String f2RegId, List<String> marks) {
-        openLine(positions, INDENT_POSITION, Constants.TAG_POSITION);
-        line(positions, INDENT_FIELD, Constants.TAG_IDENTITY, String.valueOf(number));
-        line(positions, INDENT_FIELD, Constants.TAG_QUANTITY, quantity);
-        openLine(positions, INDENT_FIELD, Constants.TAG_INFORM_F1F2);
-        openLine(positions, INDENT_INFORM_F2, Constants.TAG_INFORM_F2);
-        line(positions, INDENT_F2_REG_ID, Constants.TAG_F2_REG_ID, f2RegId);
-        closeLine(positions, INDENT_INFORM_F2, Constants.TAG_INFORM_F2);
-        closeLine(positions, INDENT_FIELD, Constants.TAG_INFORM_F1F2);
-
-        if (marks != null && !marks.isEmpty()) {
-            openLine(positions, INDENT_FIELD, Constants.TAG_MARK_CODE_INFO);
-            for (String mark : marks) {
-                positions.append(INDENT_AMC)
-                        .append('<').append(Constants.TAG_AMC)
-                        .append(' ').append(ATTR_XMLNS_CE).append("=\"").append(Constants.NAMESPACE_CE).append("\">")
-                        .append(escape(mark))
-                        .append("</").append(Constants.TAG_AMC).append('>')
-                        .append(EOL);
-            }
-            closeLine(positions, INDENT_FIELD, Constants.TAG_MARK_CODE_INFO);
-        }
-
-        closeLine(positions, INDENT_POSITION, Constants.TAG_POSITION);
+        positions.add(new Position(number, quantity, f2RegId,
+                marks == null ? Collections.emptyList() : new ArrayList<>(marks)));
     }
 
     /**
@@ -85,108 +46,94 @@ public final class ActXmlWriter {
      * Родительские каталоги создаются автоматически.
      *
      * @param outputFile файл результата
-     * @throws GenerationException если каталог или файл не удалось создать
+     * @throws GenerationException если документ или файл не удалось записать
      */
     public void writeTo(File outputFile) throws GenerationException {
-        if (outputFile == null) {
-            throw new GenerationException("Не задан файл для сохранения результата.");
-        }
+        XmlOutput.write(buildDocument(), outputFile);
+    }
 
-        StringBuilder xml = new StringBuilder(2048);
-        xml.append('<').append(Constants.TAG_DOCUMENTS)
-                .append(' ').append(Constants.ATTR_VERSION).append("=\"").append(Constants.DOCUMENTS_VERSION).append('"')
-                .append(' ').append(ATTR_XMLNS_XSI).append("=\"").append(Constants.NAMESPACE_XSI).append('"')
-                .append(' ').append(ATTR_XMLNS_NS).append("=\"").append(Constants.NAMESPACE_DOCUMENTS).append('"')
-                .append(' ').append(ATTR_XMLNS_PREF).append("=\"").append(Constants.NAMESPACE_PREF).append('"')
-                .append(' ').append(ATTR_XMLNS_AWR).append("=\"").append(Constants.NAMESPACE_AWR).append('"')
-                .append(' ').append(ATTR_XMLNS_CE).append("=\"").append(Constants.NAMESPACE_CE).append("\">")
-                .append(EOL);
+    private Document buildDocument() throws GenerationException {
+        Document document = XmlOutput.newDocument();
 
-        openLine(xml, INDENT_ENVELOPE_1, Constants.TAG_OWNER);
-        line(xml, INDENT_ENVELOPE_2, Constants.TAG_FSRAR_ID, header.getFsrarId());
-        closeLine(xml, INDENT_ENVELOPE_1, Constants.TAG_OWNER);
+        Element root = XmlOutput.element(document, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_DOCUMENTS);
+        document.appendChild(root);
+        root.setAttribute(Constants.ATTR_VERSION, Constants.DOCUMENTS_VERSION);
+        XmlOutput.declareNamespace(root, "xmlns:xsi", Constants.NAMESPACE_XSI);
+        XmlOutput.declareNamespace(root, "xmlns:ns", Constants.NAMESPACE_DOCUMENTS);
+        XmlOutput.declareNamespace(root, "xmlns:pref", Constants.NAMESPACE_PREF);
+        XmlOutput.declareNamespace(root, "xmlns:awr", Constants.NAMESPACE_AWR);
+        XmlOutput.declareNamespace(root, "xmlns:ce", Constants.NAMESPACE_CE);
 
-        openLine(xml, INDENT_ENVELOPE_1, Constants.TAG_DOCUMENT);
-        openLine(xml, INDENT_ENVELOPE_2, Constants.TAG_ACT_WRITE_OFF);
-        line(xml, INDENT_ENVELOPE_3, Constants.TAG_IDENTITY, header.getActNumber());
+        Element owner = append(root, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_OWNER);
+        owner.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_DOCUMENTS,
+                Constants.TAG_FSRAR_ID, header.getFsrarId()));
 
-        openLine(xml, INDENT_ENVELOPE_3, Constants.TAG_HEADER);
-        line(xml, INDENT_ENVELOPE_4, Constants.TAG_ACT_NUMBER, header.getActNumber());
-        line(xml, INDENT_ENVELOPE_4, Constants.TAG_ACT_DATE, header.getActDateText());
+        Element envelope = append(root, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_DOCUMENT);
+        Element act = append(envelope, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_ACT_WRITE_OFF);
+        act.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                Constants.TAG_IDENTITY, header.getActNumber()));
+
+        Element actHeader = append(act, Constants.NAMESPACE_AWR, Constants.TAG_HEADER);
+        actHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                Constants.TAG_ACT_NUMBER, header.getActNumber()));
+        actHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                Constants.TAG_ACT_DATE, header.getActDateText()));
         if (!header.getTypeWriteOff().isEmpty()) {
-            line(xml, INDENT_ENVELOPE_4, Constants.TAG_TYPE_WRITE_OFF, header.getTypeWriteOff());
+            actHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                    Constants.TAG_TYPE_WRITE_OFF, header.getTypeWriteOff()));
         }
         if (!header.getNote().isEmpty()) {
-            line(xml, INDENT_ENVELOPE_4, Constants.TAG_NOTE, header.getNote());
-        }
-        closeLine(xml, INDENT_ENVELOPE_3, Constants.TAG_HEADER);
-
-        if (positions.length() == 0) {
-            emptyLine(xml, "", Constants.TAG_CONTENT);
-        } else {
-            openLine(xml, "", Constants.TAG_CONTENT);
-            xml.append(positions);
-            closeLine(xml, "", Constants.TAG_CONTENT);
+            actHeader.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                    Constants.TAG_NOTE, header.getNote()));
         }
 
-        closeLine(xml, INDENT_ENVELOPE_2, Constants.TAG_ACT_WRITE_OFF);
-        closeLine(xml, INDENT_ENVELOPE_1, Constants.TAG_DOCUMENT);
-        // Завершающий тег — последняя строка файла, перевод строки после него не нужен.
-        xml.append("</").append(Constants.TAG_DOCUMENTS).append('>');
-
-        File parent = outputFile.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-            throw new GenerationException("Не удалось создать папку: " + parent.getAbsolutePath());
+        Element content = append(act, Constants.NAMESPACE_AWR, Constants.TAG_CONTENT);
+        for (Position position : positions) {
+            appendPosition(document, content, position);
         }
-        try {
-            Files.write(outputFile.toPath(), xml.toString().getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new GenerationException("Не удалось записать файл " + outputFile.getAbsolutePath()
-                    + ": " + e.getMessage(), e);
-        }
+        return document;
     }
 
-    private static void openLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append('<').append(tag).append('>').append(EOL);
-    }
+    private void appendPosition(Document document, Element content, Position position) {
+        Element element = append(content, Constants.NAMESPACE_AWR, Constants.TAG_POSITION);
+        element.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                Constants.TAG_IDENTITY, String.valueOf(position.number)));
+        element.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_AWR,
+                Constants.TAG_QUANTITY, position.quantity));
 
-    private static void closeLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append("</").append(tag).append('>').append(EOL);
-    }
+        Element informF1F2 = append(element, Constants.NAMESPACE_AWR, Constants.TAG_INFORM_F1F2);
+        Element informF2 = append(informF1F2, Constants.NAMESPACE_AWR, Constants.TAG_INFORM_F2);
+        informF2.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_PREF,
+                Constants.TAG_F2_REG_ID, position.f2RegId));
 
-    private static void emptyLine(StringBuilder out, String indent, String tag) {
-        out.append(indent).append('<').append(tag).append("/>").append(EOL);
-    }
-
-    private static void line(StringBuilder out, String indent, String tag, String value) {
-        out.append(indent).append('<').append(tag).append('>')
-                .append(escape(value))
-                .append("</").append(tag).append('>')
-                .append(EOL);
-    }
-
-    /** Экранирует служебные символы XML. */
-    private static String escape(String value) {
-        if (value == null) {
-            return "";
-        }
-        StringBuilder result = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '&':
-                    result.append("&amp;");
-                    break;
-                case '<':
-                    result.append("&lt;");
-                    break;
-                case '>':
-                    result.append("&gt;");
-                    break;
-                default:
-                    result.append(c);
+        if (!position.marks.isEmpty()) {
+            Element markCodeInfo = append(element, Constants.NAMESPACE_AWR, Constants.TAG_MARK_CODE_INFO);
+            for (String mark : position.marks) {
+                markCodeInfo.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_CE,
+                        Constants.TAG_AMC, mark));
             }
         }
-        return result.toString();
+    }
+
+    private static Element append(Element parent, String namespace, String name) {
+        Element element = XmlOutput.element(parent.getOwnerDocument(), namespace, name);
+        parent.appendChild(element);
+        return element;
+    }
+
+    /** Позиция акта в том виде, в каком её передал вызывающий код. */
+    private static final class Position {
+
+        private final int number;
+        private final String quantity;
+        private final String f2RegId;
+        private final List<String> marks;
+
+        private Position(int number, String quantity, String f2RegId, List<String> marks) {
+            this.number = number;
+            this.quantity = quantity;
+            this.f2RegId = f2RegId;
+            this.marks = marks;
+        }
     }
 }

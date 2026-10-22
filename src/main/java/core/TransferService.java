@@ -3,7 +3,6 @@ package core;
 import java.io.File;
 import java.util.function.Consumer;
 
-import helpers.Constants;
 import transfer.TransferParser;
 import transfer.TransferPosition;
 
@@ -59,7 +58,8 @@ public class TransferService {
                 header.getTransferNumber(), header.getIdentity(), header.getTransferDateUserText(),
                 header.getFsrarId()));
 
-        File outputFile = new File(outputDir, Constants.OUTPUT_FILE_TRANSFER);
+        File outputFile = new File(outputDir,
+                OutputNames.transfer(header.getFsrarId(), header.getTransferDate()));
         TransferXmlWriter writer = new TransferXmlWriter(header);
         for (TransferPosition position : parsed.getPositions()) {
             writer.position(position.getNumber(), position.getProductCode(),

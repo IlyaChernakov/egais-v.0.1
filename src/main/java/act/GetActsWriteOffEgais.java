@@ -38,6 +38,7 @@ public class GetActsWriteOffEgais {
         File outputDir = null;
         String fsrarId = null;
         String actNumber = null;
+        String beerActNumber = null;
         String actDateText = null;
         String typeWriteOff = null;
         String note = null;
@@ -62,6 +63,9 @@ public class GetActsWriteOffEgais {
                         break;
                     case "--number":
                         actNumber = nextValue(args, ++i, arg);
+                        break;
+                    case "--number-beer":
+                        beerActNumber = nextValue(args, ++i, arg);
                         break;
                     case "--date":
                         actDateText = nextValue(args, ++i, arg);
@@ -121,18 +125,25 @@ public class GetActsWriteOffEgais {
             }
         }
 
-        ActHeader header;
+        ActHeader strongHeader = null;
+        ActHeader beerHeader = null;
         try {
             LocalDate actDate = ActHeader.parseDate(isBlank(actDateText)
                     ? LocalDate.now().format(ActHeader.USER_DATE)
                     : actDateText);
-            header = new ActHeader(
-                    fsrarId,
-                    actNumber,
-                    actDate,
-                    typeWriteOff != null ? typeWriteOff : Constants.DEFAULT_TYPE_WRITE_OFF,
-                    note != null ? note : ActHeader.defaultNote(actDate));
-            header.validate();
+            String type = typeWriteOff != null ? typeWriteOff : Constants.DEFAULT_TYPE_WRITE_OFF;
+            String text = note != null ? note : ActHeader.defaultNote(actDate);
+            // Номера актов задаются отдельно; если номер для пива не указан,
+            // используется тот же номер, что и для крепкого алкоголя.
+            String beerNumber = isBlank(beerActNumber) ? actNumber : beerActNumber;
+            if (strong) {
+                strongHeader = new ActHeader(fsrarId, actNumber, actDate, type, text);
+                strongHeader.validate();
+            }
+            if (beer) {
+                beerHeader = new ActHeader(fsrarId, beerNumber, actDate, type, text);
+                beerHeader.validate();
+            }
         } catch (GenerationException e) {
             System.err.println("Ошибка: " + e.getMessage());
             printUsage(System.err);
@@ -142,7 +153,7 @@ public class GetActsWriteOffEgais {
         System.out.println(Constants.APP_NAME + " " + Constants.APP_VERSION);
         try {
             WriteOffService service = new WriteOffService().withLogger(System.out::println);
-            GenerationResult result = service.generate(inputFile, outputDir, header, strong, beer);
+            GenerationResult result = service.generate(inputFile, outputDir, strongHeader, beerHeader);
             System.out.println("Готово. Обработано позиций: " + result.getTotalPositions()
                     + " (крепкий алкоголь — " + result.getStrongPositions()
                     + ", пиво — " + result.getBeerPositions() + ").");
@@ -174,13 +185,14 @@ public class GetActsWriteOffEgais {
         out.println("  java -jar egais-writeoff.jar");
         out.println("      — открыть графический интерфейс;");
         out.println("  java -jar egais-writeoff.jar --in <файл остатков> --out <папка> --number <номер>");
-        out.println("      [--fsrar-id <код>] [--date <ДД-ММ-ГГГГ>] [--type <причина>] [--note <текст>]");
-        out.println("      [--strong] [--beer]");
+        out.println("      [--number-beer <номер>] [--fsrar-id <код>] [--date <ДД-ММ-ГГГГ>]");
+        out.println("      [--type <причина>] [--note <текст>] [--strong] [--beer]");
         out.println("      — сформировать акты без интерфейса.");
         out.println();
         out.println("  --in       <файл>          выгрузка остатков ЕГАИС (ReplyRests_v2.xml)");
         out.println("  --out      <папка>         папка для сохранения актов списания");
-        out.println("  --number   <номер>         номер акта (он же awr:Identity документа)");
+        out.println("  --number   <номер>         номер акта по крепкому алкоголю (он же awr:Identity)");
+        out.println("  --number-beer <номер>      номер акта по пиву; по умолчанию — как --number");
         out.println("  --fsrar-id <код>           FSRAR_ID организации; если не указан, берётся из файла остатков");
         out.println("  --date     <ДД-ММ-ГГГГ>    дата списания, по умолчанию — сегодняшняя");
         out.println("  --type     <причина>       причина списания, по умолчанию — «"

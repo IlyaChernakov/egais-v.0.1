@@ -90,11 +90,6 @@ public final class Constants {
     /** Фиксированная (серединная) часть марки. */
     public static final String MID_MARK = "1NKN31105001000188NQQMS5VP4HTF5SB46ZSQQJD8";
 
-    // --- Имена файлов результата ---
-
-    public static final String OUTPUT_FILE_STRONG = "ActWriteOffStrong.xml";
-    public static final String OUTPUT_FILE_BEER = "ActWriteOffBeer.xml";
-
     // --- Отправка акта в УТМ ---
 
     /** Адрес УТМ по умолчанию (поле «Адрес УТМ» предзаполняется этим значением). */
@@ -117,10 +112,10 @@ public final class Constants {
     /** Пространство имён документа переноса остатков в магазин. */
     public static final String NAMESPACE_TTS = "http://fsrar.ru/WEGAIS/TransferToShop";
 
-    /** Пространство имён общей части документов ЕГАИС — как в образце переноса. */
+    /** Пространство имён общей части документов ЕГАИС. */
     public static final String NAMESPACE_COMMON = "http://fsrar.ru/WEGAIS/Common";
 
-    /** Пространство имён XML-схемы в образце переноса ({@code xmlns:xs}). */
+    /** Служебное пространство имён XML-схемы ({@code xmlns:xs}). */
     public static final String NAMESPACE_XS = "http://www.w3.org/2001/XMLSchema";
 
     /** Корневой элемент документа переноса внутри конверта {@code ns:Document}. */
@@ -136,12 +131,6 @@ public final class Constants {
     public static final String TTS_HEADER = "tts:Header";
     public static final String TTS_TRANSFER_NUMBER = "tts:TransferNumber";
     public static final String TTS_TRANSFER_DATE = "tts:TransferDate";
-
-    /** XML-декларация документа переноса — как в образце {@code files-/TransferToShop.xml}. */
-    public static final String XML_DECLARATION_UTF8 = "<?xml version=\"1.0\" encoding=\"utf-8\"?>";
-
-    /** Имя файла результата для документа переноса остатков в магазин. */
-    public static final String OUTPUT_FILE_TRANSFER = "TransferToShop.xml";
 
     /** Путь приёма документов переноса остатков в магазин в УТМ. */
     public static final String UTM_TRANSFER_TO_SHOP_PATH = "/opt/in/TransferToShop";

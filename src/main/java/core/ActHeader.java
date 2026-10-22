@@ -9,12 +9,14 @@ import helpers.Constants;
 
 /**
  * Данные шапки акта списания: они одинаковы для всех позиций документа
- * и попадают в конверт {@code ns:Documents} (см. образец {@code files/1.xml}).
+ * и попадают в конверт {@code ns:Documents}.
  * <p>
  * Значения, которые вводит пользователь:
  * <ul>
  *   <li>{@code FSRAR_ID} организации — узел {@code ns:Owner/ns:FSRAR_ID};</li>
- *   <li>номер акта — он же {@code awr:ActNumber} и {@code awr:Identity};</li>
+ *   <li>номер акта — он же {@code awr:ActNumber} и {@code awr:Identity}; для крепкого
+ *       алкоголя и для пива номера задаются отдельно, поэтому шапка собирается
+ *       на каждый акт своя;</li>
  *   <li>дата списания — {@code awr:ActDate};</li>
  *   <li>причина списания — {@code awr:TypeWriteOff};</li>
  *   <li>примечание — {@code awr:Note}.</li>

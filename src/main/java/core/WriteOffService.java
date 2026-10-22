@@ -13,7 +13,6 @@ import alco.beer.XmlParserBeer;
 import alco.strong.ActPositionStrong;
 import alco.strong.FileGenerateStrong;
 import alco.strong.XmlParserStrong;
-import helpers.Constants;
 import helpers.XmlSupport;
 
 /**
@@ -41,53 +40,53 @@ public class WriteOffService {
     }
 
     /**
-     * Формирует акты списания.
+     * Формирует акты списания. Номера актов по крепкому алкоголю и по пиву задаются
+     * отдельно, поэтому шапка передаётся для каждого акта своя.
      *
-     * @param inputFile файл выгрузки остатков (ReplyRests_v2.xml)
-     * @param outputDir папка для сохранения результата
-     * @param header    данные шапки акта: FSRAR_ID, номер, дата, причина, примечание
-     * @param strong    формировать акт по крепкому алкоголю
-     * @param beer      формировать акт по пиву
+     * @param inputFile    файл выгрузки остатков (ReplyRests_v2.xml)
+     * @param outputDir    папка для сохранения результата
+     * @param strongHeader шапка акта по крепкому алкоголю; {@code null} — акт не формируется
+     * @param beerHeader   шапка акта по пиву и пивным напиткам; {@code null} — акт не формируется
      * @return итог работы: количество позиций и список записанных файлов
      * @throws GenerationException если данные некорректны или файлы не удалось записать
      */
-    public GenerationResult generate(File inputFile, File outputDir, ActHeader header, boolean strong, boolean beer)
+    public GenerationResult generate(File inputFile, File outputDir, ActHeader strongHeader, ActHeader beerHeader)
             throws GenerationException {
 
-        validate(inputFile, outputDir, header, strong, beer);
+        validate(inputFile, outputDir, strongHeader, beerHeader);
 
         logger.accept("Чтение файла остатков: " + inputFile.getAbsolutePath());
         Document document = XmlSupport.parse(inputFile);
-
-        logger.accept(String.format("Акт №%s от %s, FSRAR_ID %s, причина: %s.",
-                header.getActNumber(), header.getActDateUserText(), header.getFsrarId(),
-                header.getTypeWriteOff().isEmpty() ? "не указана" : header.getTypeWriteOff()));
 
         List<File> writtenFiles = new ArrayList<>();
         int strongPositions = 0;
         int strongMarks = 0;
         int beerPositions = 0;
 
-        if (strong) {
+        if (strongHeader != null) {
+            logHeader("Крепкий алкоголь", strongHeader);
             List<ActPositionStrong> positions = new XmlParserStrong().parseDocument(document);
-            File outputFile = new File(outputDir, Constants.OUTPUT_FILE_STRONG);
-            strongMarks = new FileGenerateStrong().generateXmlFile(positions, header, outputFile);
+            File outputFile = new File(outputDir,
+                    OutputNames.writeOffStrong(strongHeader.getFsrarId(), strongHeader.getActDate()));
+            strongMarks = new FileGenerateStrong().generateXmlFile(positions, strongHeader, outputFile);
             strongPositions = positions.size();
             writtenFiles.add(outputFile);
-            logger.accept(String.format("Крепкий алкоголь: позиций — %d, марок — %d.", strongPositions, strongMarks));
+            logger.accept(String.format("Позиций — %d, марок — %d.", strongPositions, strongMarks));
             logger.accept("  записан файл: " + outputFile.getAbsolutePath());
             if (strongPositions == 0) {
                 logger.accept("  внимание: подходящих позиций не найдено, акт пустой.");
             }
         }
 
-        if (beer) {
+        if (beerHeader != null) {
+            logHeader("Пиво и пивные напитки", beerHeader);
             List<ActPositionBeer> positions = new XmlParserBeer().parseDocument(document);
-            File outputFile = new File(outputDir, Constants.OUTPUT_FILE_BEER);
-            new FileGenerateBeer().generateXmlFileBeer(positions, header, outputFile);
+            File outputFile = new File(outputDir,
+                    OutputNames.writeOffBeer(beerHeader.getFsrarId(), beerHeader.getActDate()));
+            new FileGenerateBeer().generateXmlFileBeer(positions, beerHeader, outputFile);
             beerPositions = positions.size();
             writtenFiles.add(outputFile);
-            logger.accept(String.format("Пиво: позиций — %d.", beerPositions));
+            logger.accept(String.format("Позиций — %d.", beerPositions));
             logger.accept("  записан файл: " + outputFile.getAbsolutePath());
             if (beerPositions == 0) {
                 logger.accept("  внимание: подходящих позиций не найдено, акт пустой.");
@@ -97,7 +96,13 @@ public class WriteOffService {
         return new GenerationResult(strongPositions, strongMarks, beerPositions, writtenFiles);
     }
 
-    private void validate(File inputFile, File outputDir, ActHeader header, boolean strong, boolean beer)
+    private void logHeader(String kind, ActHeader header) {
+        logger.accept(String.format("%s: акт №%s от %s, FSRAR_ID %s, причина: %s.", kind,
+                header.getActNumber(), header.getActDateUserText(), header.getFsrarId(),
+                header.getTypeWriteOff().isEmpty() ? "не указана" : header.getTypeWriteOff()));
+    }
+
+    private void validate(File inputFile, File outputDir, ActHeader strongHeader, ActHeader beerHeader)
             throws GenerationException {
         if (inputFile == null) {
             throw new GenerationException("Не выбран файл остатков.");
@@ -116,12 +121,14 @@ public class WriteOffService {
                 throw new GenerationException("Не удалось создать папку: " + outputDir.getAbsolutePath());
             }
         }
-        if (!strong && !beer) {
+        if (strongHeader == null && beerHeader == null) {
             throw new GenerationException("Не выбран ни один акт для формирования.");
         }
-        if (header == null) {
-            throw new GenerationException("Не заполнены данные акта.");
+        if (strongHeader != null) {
+            strongHeader.validate();
         }
-        header.validate();
+        if (beerHeader != null) {
+            beerHeader.validate();
+        }
     }
 }

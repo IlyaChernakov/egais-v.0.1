@@ -52,6 +52,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import core.ActHeader;
 import core.GenerationException;
 import core.GenerationResult;
+import core.OutputNames;
 import core.TransferHeader;
 import core.TransferResult;
 import core.TransferService;
@@ -72,7 +73,10 @@ public class MainFrame extends JFrame {
     private static final String PREF_LAST_INPUT_FILE = "lastInputFile";
     private static final String PREF_LAST_INPUT_DIR = "lastInputDir";
     private static final String PREF_LAST_OUTPUT_DIR = "lastOutputDir";
-    private static final String PREF_ACT_NUMBER = "actNumber";
+    private static final String PREF_ACT_NUMBER_STRONG = "actNumberStrong";
+    private static final String PREF_ACT_NUMBER_BEER = "actNumberBeer";
+    /** Прежний ключ номера: пока номер акта был один на оба акта. */
+    private static final String PREF_ACT_NUMBER_LEGACY = "actNumber";
     private static final String PREF_TYPE_WRITE_OFF = "typeWriteOff";
     private static final String PREF_UTM_ADDRESS = "utmAddress";
     private static final String PREF_LAST_SHOP_FILE = "lastShopRestsFile";
@@ -92,13 +96,14 @@ public class MainFrame extends JFrame {
     private final JTextField inputField = new JTextField();
     private final JTextField outputField = new JTextField();
     private final JTextField fsrarIdField = new JTextField();
-    private final JTextField actNumberField = new JTextField();
+    private final JTextField actNumberStrongField = new JTextField();
+    private final JTextField actNumberBeerField = new JTextField();
     private final JTextField actDateField = new JTextField();
     private final JTextField typeWriteOffField = new JTextField();
     private final JTextField noteField = new JTextField();
     private final JTextField utmAddressField = new JTextField();
-    private final JCheckBox strongCheckBox = new JCheckBox("Крепкий алкоголь — ActWriteOffStrong.xml", true);
-    private final JCheckBox beerCheckBox = new JCheckBox("Пиво и пивные напитки — ActWriteOffBeer.xml", true);
+    private final JCheckBox strongCheckBox = new JCheckBox("Крепкий алкоголь — ActWriteOff_v3(S)", true);
+    private final JCheckBox beerCheckBox = new JCheckBox("Пиво и пивные напитки — ActWriteOff_v3(B)", true);
     private final JTextArea logArea = new JTextArea();
     private final JLabel statusLabel = new JLabel("Готово к работе");
     private final JProgressBar progressBar = new JProgressBar();
@@ -268,6 +273,8 @@ public class MainFrame extends JFrame {
         // Что формировать
         optionsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
         optionsPanel.setBorder(BorderFactory.createTitledBorder("Что формировать"));
+        strongCheckBox.setToolTipText("Файл ActWriteOff_v3(S)_<FSRAR_ID>_<ДД-ММ-ГГГГ>.xml");
+        beerCheckBox.setToolTipText("Файл ActWriteOff_v3(B)_<FSRAR_ID>_<ДД-ММ-ГГГГ>.xml");
         optionsPanel.add(strongCheckBox);
         optionsPanel.add(beerCheckBox);
 
@@ -470,7 +477,8 @@ public class MainFrame extends JFrame {
 
     /**
      * Панель с данными шапки акта — они попадают в конверт документа
-     * {@code ns:Documents} (см. образец {@code files/1.xml}).
+     * {@code ns:Documents}. Номера актов по крепкому алкоголю и по пиву
+     * задаются отдельно.
      */
     private JPanel buildActHeaderPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
@@ -494,19 +502,23 @@ public class MainFrame extends JFrame {
         fsrarIdField.setEditable(false);
         fsrarIdField.setToolTipText("Заполняется автоматически из файла остатков ЕГАИС и не редактируется.");
 
-        addHeaderRow(panel, new JLabel("Номер акта:"), actNumberField, 1,
+        addHeaderRow(panel, new JLabel("Номер акта (крепкий алкоголь):"), actNumberStrongField, 1,
                 labelConstraints, fieldConstraints, writeOffComponents);
-        actNumberField.setToolTipText("Номер акта; он же записывается в awr:Identity документа");
+        actNumberStrongField.setToolTipText("Номер акта по крепкому алкоголю; он же awr:Identity этого акта");
 
-        addHeaderRow(panel, new JLabel("Дата списания (ДД-ММ-ГГГГ):"), actDateField, 2,
+        addHeaderRow(panel, new JLabel("Номер акта (пиво):"), actNumberBeerField, 2,
+                labelConstraints, fieldConstraints, writeOffComponents);
+        actNumberBeerField.setToolTipText("Номер акта по пиву; он же awr:Identity этого акта");
+
+        addHeaderRow(panel, new JLabel("Дата списания (ДД-ММ-ГГГГ):"), actDateField, 3,
                 labelConstraints, fieldConstraints, writeOffComponents);
         actDateField.setToolTipText("Дата акта; принимается и формат ГГГГ-ММ-ДД");
 
-        addHeaderRow(panel, new JLabel("Причина списания:"), typeWriteOffField, 3,
+        addHeaderRow(panel, new JLabel("Причина списания:"), typeWriteOffField, 4,
                 labelConstraints, fieldConstraints, writeOffComponents);
         typeWriteOffField.setToolTipText("Значение awr:TypeWriteOff. Пустое поле — тег в акт не записывается.");
 
-        addHeaderRow(panel, new JLabel("Примечание:"), noteField, 4,
+        addHeaderRow(panel, new JLabel("Примечание:"), noteField, 5,
                 labelConstraints, fieldConstraints, writeOffComponents);
         noteField.setToolTipText("Значение awr:Note. Пустое поле — тег в акт не записывается.");
 
@@ -866,11 +878,32 @@ public class MainFrame extends JFrame {
             return;
         }
 
-        ActHeader header;
+        if (strong && actNumberStrongField.getText().trim().isEmpty()) {
+            showWarning("Укажите номер акта по крепкому алкоголю.");
+            return;
+        }
+        if (beer && actNumberBeerField.getText().trim().isEmpty()) {
+            showWarning("Укажите номер акта по пиву.");
+            return;
+        }
+
+        final ActHeader strongHeader;
+        final ActHeader beerHeader;
         try {
-            header = ActHeader.of(fsrarIdField.getText(), actNumberField.getText(),
-                    actDateField.getText(), typeWriteOffField.getText(), noteField.getText());
-            header.validate();
+            strongHeader = strong
+                    ? ActHeader.of(fsrarIdField.getText(), actNumberStrongField.getText(),
+                            actDateField.getText(), typeWriteOffField.getText(), noteField.getText())
+                    : null;
+            beerHeader = beer
+                    ? ActHeader.of(fsrarIdField.getText(), actNumberBeerField.getText(),
+                            actDateField.getText(), typeWriteOffField.getText(), noteField.getText())
+                    : null;
+            if (strongHeader != null) {
+                strongHeader.validate();
+            }
+            if (beerHeader != null) {
+                beerHeader.validate();
+            }
         } catch (GenerationException e) {
             showWarning(e.getMessage());
             return;
@@ -879,8 +912,9 @@ public class MainFrame extends JFrame {
         writePreference(PREF_LAST_INPUT_FILE, inputFile);
         writePreference(PREF_LAST_INPUT_DIR, inputFile.getParentFile());
         writePreference(PREF_LAST_OUTPUT_DIR, outputDirectory);
-        writePreference(PREF_ACT_NUMBER, header.getActNumber());
-        writePreference(PREF_TYPE_WRITE_OFF, header.getTypeWriteOff());
+        writePreference(PREF_ACT_NUMBER_STRONG, actNumberStrongField.getText());
+        writePreference(PREF_ACT_NUMBER_BEER, actNumberBeerField.getText());
+        writePreference(PREF_TYPE_WRITE_OFF, typeWriteOffField.getText());
 
         setBusy(true);
         log("――― Начало формирования актов ―――");
@@ -889,7 +923,7 @@ public class MainFrame extends JFrame {
             @Override
             protected GenerationResult doInBackground() throws Exception {
                 WriteOffService service = new WriteOffService().withLogger(this::publish);
-                return service.generate(inputFile, outputDirectory, header, strong, beer);
+                return service.generate(inputFile, outputDirectory, strongHeader, beerHeader);
             }
 
             @Override
@@ -966,7 +1000,7 @@ public class MainFrame extends JFrame {
                     + " поэтому документ переноса сформировать нельзя.\n\nФайл: " + shopFile.getAbsolutePath());
             return;
         }
-        // Если Identity не заполнен, он совпадает с номером переноса — как в образце.
+        // Если Identity не заполнен, он совпадает с номером переноса.
         if (transferIdentityField.getText().trim().isEmpty()) {
             transferIdentityField.setText(transferNumberField.getText().trim());
         }
@@ -1200,8 +1234,11 @@ public class MainFrame extends JFrame {
 
     /**
      * Файлы для отправки: сформированные последним запуском, а если их нет —
-     * найденные в папке результата. В режиме переноса это документ TransferToShop.xml,
+     * найденные в папке результата. В режиме переноса это документ TransferToShop,
      * в режиме списания — акты по крепкому алкоголю и пиву.
+     * <p>
+     * Имена файлов содержат FSRAR_ID и дату, поэтому в папке ищется самый свежий
+     * файл каждого вида.
      */
     private List<File> filesToSend() {
         List<File> files = new ArrayList<>();
@@ -1217,13 +1254,24 @@ public class MainFrame extends JFrame {
         if (directory == null || !directory.isDirectory()) {
             return files;
         }
-        String[] names = transferModeRadio.isSelected()
-                ? new String[]{Constants.OUTPUT_FILE_TRANSFER}
-                : new String[]{Constants.OUTPUT_FILE_STRONG, Constants.OUTPUT_FILE_BEER};
-        for (String name : names) {
-            File file = new File(directory, name);
-            if (file.isFile()) {
-                files.add(file);
+        String[] prefixes = transferModeRadio.isSelected()
+                ? new String[]{OutputNames.TRANSFER_PREFIX}
+                : new String[]{OutputNames.STRONG_PREFIX, OutputNames.BEER_PREFIX};
+        File[] found = directory.listFiles();
+        if (found != null) {
+            for (String prefix : prefixes) {
+                File newest = null;
+                for (File file : found) {
+                    if (!file.isFile() || !file.getName().startsWith(prefix)) {
+                        continue;
+                    }
+                    if (newest == null || file.lastModified() > newest.lastModified()) {
+                        newest = file;
+                    }
+                }
+                if (newest != null) {
+                    files.add(newest);
+                }
             }
         }
         return files;
@@ -1279,11 +1327,12 @@ public class MainFrame extends JFrame {
                         + "Программа работает в двух режимах, которые несовместимы:\n\n"
                         + "1. Акты списания по крепкому алкоголю и пиву\n"
                         + "   на основании выгрузки текущих остатков из ЕГАИС (ReplyRests_v2.xml).\n"
-                        + "   Результат: ActWriteOffStrong.xml и ActWriteOffBeer.xml.\n\n"
+                        + "   Результат: ActWriteOff_v3(S)_ и ActWriteOff_v3(B)_\n"
+                        + "   с FSRAR_ID и датой в имени файла.\n\n"
                         + "2. Перенос остатков в магазин (TransferToShop)\n"
                         + "   по выгрузке остатков магазина (ReplyRestsShop_v2.xml)\n"
                         + "   и выгрузке остатков склада (ReplyRests_v2.xml).\n"
-                        + "   Результат: TransferToShop.xml.\n\n"
+                        + "   Результат: TransferToShop_<FSRAR_ID>_<ДД-ММ-ГГГГ>.xml.\n\n"
                         + "FSRAR_ID организации берётся из выбранного файла остатков.\n"
                         + "Остальные данные документа задаются в окне.\n\n"
                         + "Готовый документ можно отправить в УТМ утилитой curl\n"
@@ -1576,9 +1625,17 @@ public class MainFrame extends JFrame {
                 outputField.setText(directory.getAbsolutePath());
             }
         }
-        String savedActNumber = readPreference(PREF_ACT_NUMBER);
-        if (savedActNumber != null && !savedActNumber.trim().isEmpty()) {
-            actNumberField.setText(savedActNumber);
+        String savedStrongNumber = readPreference(PREF_ACT_NUMBER_STRONG);
+        if (savedStrongNumber == null || savedStrongNumber.trim().isEmpty()) {
+            // Значение из версии, где номер акта был один на оба акта.
+            savedStrongNumber = readPreference(PREF_ACT_NUMBER_LEGACY);
+        }
+        if (savedStrongNumber != null && !savedStrongNumber.trim().isEmpty()) {
+            actNumberStrongField.setText(savedStrongNumber);
+        }
+        String savedBeerNumber = readPreference(PREF_ACT_NUMBER_BEER);
+        if (savedBeerNumber != null && !savedBeerNumber.trim().isEmpty()) {
+            actNumberBeerField.setText(savedBeerNumber);
         }
         String savedTypeWriteOff = readPreference(PREF_TYPE_WRITE_OFF);
         if (savedTypeWriteOff != null && !savedTypeWriteOff.trim().isEmpty()) {
