@@ -106,7 +106,6 @@ public class GetActsWriteOffEgais {
             return 2;
         }
         if (!anyKindSelected) {
-            // По умолчанию формируются оба акта — как в исходной версии программы.
             strong = true;
             beer = true;
         }

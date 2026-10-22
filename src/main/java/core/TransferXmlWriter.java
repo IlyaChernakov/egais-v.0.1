@@ -66,8 +66,6 @@ public final class TransferXmlWriter {
                 Constants.TAG_FSRAR_ID, header.getFsrarId()));
 
         Element envelope = append(root, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_DOCUMENT);
-        // Как и в других документах ЕГАИС, корневой элемент переноса записан
-        // с префиксом конверта, а его содержимое — в собственном пространстве имён.
         Element transfer = append(envelope, Constants.NAMESPACE_DOCUMENTS, Constants.TAG_TRANSFER_TO_SHOP);
         transfer.appendChild(XmlOutput.textElement(document, Constants.NAMESPACE_TTS,
                 Constants.TTS_IDENTITY, header.getIdentity()));
