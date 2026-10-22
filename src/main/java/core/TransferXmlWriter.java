@@ -32,8 +32,6 @@ public final class TransferXmlWriter {
     private static final String INDENT_ENVELOPE_3 = "            ";
     private static final String INDENT_ENVELOPE_4 = "                ";
 
-    // В образце блок tts:Content оформлен с отступом в 4 пробела на уровень,
-    // а сам открывающий тег стоит в первой колонке — сохраняем это как есть.
     private static final String INDENT_POSITION = "    ";
     private static final String INDENT_FIELD = "        ";
     private static final String INDENT_F2_REG_ID = "            ";
@@ -105,7 +103,6 @@ public final class TransferXmlWriter {
         line(xml, INDENT_ENVELOPE_4, Constants.TTS_TRANSFER_DATE, header.getTransferDateText());
         closeLine(xml, INDENT_ENVELOPE_3, Constants.TTS_HEADER);
 
-        // Открывающий тег Content стоит в первой колонке, как в образце.
         if (positions.length() == 0) {
             emptyLine(xml, "", Constants.TTS_CONTENT);
         } else {

@@ -32,9 +32,6 @@ public final class ActXmlWriter {
     private static final String INDENT_ENVELOPE_2 = "    ";
     private static final String INDENT_ENVELOPE_3 = "      ";
     private static final String INDENT_ENVELOPE_4 = "        ";
-
-    // В образце блок awr:Content оформлен с отступом в 4 пробела на уровень,
-    // а сам открывающий тег стоит в первой колонке — сохраняем это как есть.
     private static final String INDENT_POSITION = "    ";
     private static final String INDENT_FIELD = "        ";
     private static final String INDENT_INFORM_F2 = "            ";
@@ -124,7 +121,6 @@ public final class ActXmlWriter {
         }
         closeLine(xml, INDENT_ENVELOPE_3, Constants.TAG_HEADER);
 
-        // Открывающий тег Content стоит в первой колонке, как в образце.
         if (positions.length() == 0) {
             emptyLine(xml, "", Constants.TAG_CONTENT);
         } else {

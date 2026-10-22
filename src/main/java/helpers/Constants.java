@@ -43,7 +43,7 @@ public final class Constants {
 
     public static final String TAG_SHOP_POSITION = "rst:ShopPosition";
 
-    // --- Конверт документа акта списания (как в образце files/1.xml) ---
+    // --- Конверт документа акта списания ---
 
     public static final String TAG_DOCUMENTS = "ns:Documents";
     public static final String TAG_OWNER = "ns:Owner";
