@@ -1,0 +1,14 @@
+# Результаты сборки
+target/
+build/
+dist/
+out/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Прочее
+*.log
+.DS_Store
+Thumbs.db
