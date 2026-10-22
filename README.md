@@ -152,18 +152,21 @@ Java: XML-декларация `<?xml version="1.0" encoding="UTF-8"?>`, каж�
 
 ## Сборка
 
+Все команды выполняются из папки проекта — вместо `C:\путь\к\проекту` укажите
+свой путь.
+
 Самый простой способ — `build.cmd` (он сам обходит запрет на выполнение `.ps1`,
 который часто включён в Windows по умолчанию):
 
 ```bat
-cd C:\Users\Admin\IdeaProjects\egais-v.0.1
+cd C:\путь\к\проекту
 build.cmd
 ```
 
 Либо тот же скрипт напрямую, если политика выполнения позволяет:
 
 ```powershell
-cd C:\Users\Admin\IdeaProjects\egais-v.0.1
+cd C:\путь\к\проекту
 .\build.ps1
 # если появляется «выполнение сценариев отключено»:
 powershell -ExecutionPolicy Bypass -File .\build.ps1
